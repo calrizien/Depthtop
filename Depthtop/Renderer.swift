@@ -54,6 +54,12 @@ final class RendererTaskExecutor: TaskExecutor {
     static var shared: RendererTaskExecutor = RendererTaskExecutor()
 }
 
+// Window render data that can be passed across actor boundaries
+struct WindowRenderData {
+    let texture: MTLTexture
+    let modelMatrix: float4x4
+}
+
 actor Renderer {
 
     let device: MTLDevice
@@ -86,6 +92,9 @@ actor Renderer {
     var rotation: Float = 0
 
     var mesh: MTKMesh
+    var quadMesh: MTKMesh!  // For window quads
+    
+    var windowRenderData: [WindowRenderData] = []  // Current windows to render
 
     let worldTracking: WorldTrackingProvider
     let layerRenderer: LayerRenderer
@@ -143,6 +152,7 @@ actor Renderer {
 
         do {
             mesh = try Self.buildMesh(device: device, mtlVertexDescriptor: mtlVertexDescriptor)
+            quadMesh = try Self.buildQuadMesh(device: device, mtlVertexDescriptor: mtlVertexDescriptor)
         } catch {
             fatalError("Unable to build MetalKit Mesh. Error info: \(error)")
         }
@@ -276,6 +286,31 @@ actor Renderer {
 
         return try MTKMesh(mesh: mdlMesh, device: device)
     }
+    
+    static func buildQuadMesh(device: MTLDevice,
+                             mtlVertexDescriptor: MTLVertexDescriptor) throws -> MTKMesh {
+        /// Create a simple quad for displaying window textures
+        
+        let metalAllocator = MTKMeshBufferAllocator(device: device)
+        
+        // Create a plane mesh (quad)
+        let mdlMesh = MDLMesh(planeWithExtent: SIMD3<Float>(2, 2, 0),
+                              segments: SIMD2<UInt32>(1, 1),
+                              geometryType: .triangles,
+                              allocator: metalAllocator)
+        
+        let mdlVertexDescriptor = MTKModelIOVertexDescriptorFromMetal(mtlVertexDescriptor)
+        
+        guard let attributes = mdlVertexDescriptor.attributes as? [MDLVertexAttribute] else {
+            throw RendererError.badVertexDescriptor
+        }
+        attributes[VertexAttribute.position.rawValue].name = MDLVertexAttributePosition
+        attributes[VertexAttribute.texcoord.rawValue].name = MDLVertexAttributeTextureCoordinate
+        
+        mdlMesh.vertexDescriptor = mdlVertexDescriptor
+        
+        return try MTKMesh(mesh: mdlMesh, device: device)
+    }
 
     static func loadTexture(device: MTLDevice,
                             textureName: String) throws -> MTLTexture {
@@ -318,14 +353,15 @@ actor Renderer {
 
     private func updateGameState() {
         /// Update any game state before rendering
-
+        
+        // For now, always show demo cube until we handle actor isolation
         let rotationAxis = SIMD3<Float>(1, 1, 0)
         let modelRotationMatrix = matrix4x4_rotation(radians: rotation, axis: rotationAxis)
         let modelTranslationMatrix = matrix4x4_translation(0.0, 0.0, -8.0)
         let modelMatrix = modelTranslationMatrix * modelRotationMatrix
-
+        
         self.uniforms[0].modelMatrix = modelMatrix
-
+        
         rotation += 0.01
     }
 
@@ -343,6 +379,8 @@ actor Renderer {
         // Perform frame independent work
 
         self.updateDynamicBufferState(frameIndex: frame.frameIndex)
+        
+        // Window data will be updated separately
 
         self.updateGameState()
 
@@ -485,14 +523,48 @@ actor Renderer {
             }
         }
 
-        self.fragmentArgumentTable.setTexture(colorMap.gpuResourceID, index: TextureIndex.color.rawValue)
-
-        for submesh in mesh.submeshes {
-            renderEncoder.drawIndexedPrimitives(primitiveType: submesh.primitiveType,
-                                                indexCount: submesh.indexCount,
-                                                indexType: submesh.indexType,
-                                                indexBuffer: submesh.indexBuffer.buffer.gpuAddress + UInt64(submesh.indexBuffer.offset),
-                                                indexBufferLength: submesh.indexBuffer.buffer.length)
+        // Render captured windows if any, otherwise render demo cube
+        if !windowRenderData.isEmpty {
+            // Render each captured window as a quad
+            for windowData in windowRenderData {
+                // Update uniforms with window's transform
+                uniforms[0].modelMatrix = windowData.modelMatrix
+                
+                // Set window texture
+                self.fragmentArgumentTable.setTexture(windowData.texture.gpuResourceID, index: TextureIndex.color.rawValue)
+                
+                // Update vertex buffers for quad
+                for (index, element) in quadMesh.vertexDescriptor.layouts.enumerated() {
+                    guard let layout = element as? MDLVertexBufferLayout else {
+                        fatalError("unsupported layout")
+                    }
+                    
+                    if layout.stride != 0 {
+                        let buffer = quadMesh.vertexBuffers[index]
+                        self.vertexArgumentTable.setAddress(buffer.buffer.gpuAddress + UInt64(buffer.offset), index: index)
+                    }
+                }
+                
+                // Draw quad
+                for submesh in quadMesh.submeshes {
+                    renderEncoder.drawIndexedPrimitives(primitiveType: submesh.primitiveType,
+                                                        indexCount: submesh.indexCount,
+                                                        indexType: submesh.indexType,
+                                                        indexBuffer: submesh.indexBuffer.buffer.gpuAddress + UInt64(submesh.indexBuffer.offset),
+                                                        indexBufferLength: submesh.indexBuffer.buffer.length)
+                }
+            }
+        } else {
+            // Fallback to demo cube
+            self.fragmentArgumentTable.setTexture(colorMap.gpuResourceID, index: TextureIndex.color.rawValue)
+            
+            for submesh in mesh.submeshes {
+                renderEncoder.drawIndexedPrimitives(primitiveType: submesh.primitiveType,
+                                                    indexCount: submesh.indexCount,
+                                                    indexType: submesh.indexType,
+                                                    indexBuffer: submesh.indexBuffer.buffer.gpuAddress + UInt64(submesh.indexBuffer.offset),
+                                                    indexBufferLength: submesh.indexBuffer.buffer.length)
+            }
         }
 
         renderEncoder.popDebugGroup()
@@ -504,6 +576,10 @@ actor Renderer {
         drawable.encodePresent()
     }
 
+    func updateWindowData(_ data: [WindowRenderData]) {
+        windowRenderData = data
+    }
+    
     func renderLoop() {
         while true {
             if layerRenderer.state == .invalidated {
@@ -522,6 +598,15 @@ actor Renderer {
                 Task { @MainActor in
                     if appModel.immersiveSpaceState != .open {
                         appModel.immersiveSpaceState = .open
+                    }
+                    
+                    // Update window data from MainActor
+                    let windowData = appModel.capturedWindows.compactMap { window -> WindowRenderData? in
+                        guard let texture = window.texture else { return nil }
+                        return WindowRenderData(texture: texture, modelMatrix: window.modelMatrix)
+                    }
+                    Task {
+                        await self.updateWindowData(windowData)
                     }
                 }
                 autoreleasepool {
