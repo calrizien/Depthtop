@@ -170,3 +170,55 @@ xcodebuild test -scheme Depthtop -destination 'platform=macOS'
 - [ScreenCaptureKit Guide](https://developer.apple.com/documentation/screencapturekit)
 - [Metal Spatial Rendering Sample](https://github.com/metal-by-example/metal-spatial-rendering)
 - Technical Report: "Stereoscopic Text Overlays for Mac Virtual Display"
+
+## Critical Implementation Rules (MUST FOLLOW)
+
+### 1. CompositorServices Command Buffer Order
+**CRITICAL**: In `LayerRenderer.Drawable` rendering, the order MUST be:
+1. `renderEncoder.endEncoding()` - End all encoding first
+2. `drawableRenderContext.endEncoding(commandEncoder:)` - End drawable context
+3. `drawable.encodePresent()` - Encode presentation BEFORE commit
+4. `commandQueue.commit([commandBuffer])` - Commit is LAST
+
+**Error if violated**: "BUG IN CLIENT: cannot present drawable: command buffer used by render context end encoding must be last commit command buffer to the command queue"
+
+### 2. Metal Residency Set Scoping
+When using `MTLResidencySet` with simulator conditionals:
+- Declare variable OUTSIDE the `#if !targetEnvironment(simulator)` block as optional
+- Only populate inside the conditional block
+- Use optional chaining when accessing
+
+```swift
+var residencySet: MTLResidencySet?
+#if !targetEnvironment(simulator)
+residencySet = self.residencySets[uniformBufferIndex]
+// ... populate
+#endif
+if let residencySet = residencySet {
+    commandBuffer.useResidencySet(residencySet)
+}
+```
+
+### 3. Metal Binary Archive Requirement
+Always compile Metal shaders to a binary archive (`default-binaryarchive.metallib`) to avoid runtime compilation warnings:
+- Use `xcrun metal -c` to compile to AIR
+- Use `xcrun metallib` to create .metallib
+- Add to bundle resources in Xcode
+- Use `-std=metal3.0` for visionOS compatibility (not `-std=macos-metal3.0`)
+
+### 4. RemoteImmersiveSpace Connection Handling
+Always check for nil `remoteDeviceIdentifier` before using:
+- Guard against nil device ID
+- Provide user feedback when Vision Pro isn't connected
+- Close immersive space gracefully on connection failure
+
+### 5. Actor Isolation for Texture Passing
+When passing textures between MainActor and renderer actor:
+- Create immutable data structures (`WindowRenderData`) to pass across boundaries
+- Don't block the render loop waiting for texture updates
+- Continue rendering with available data
+
+### 6. Window Capture Texture Lifecycle
+- Keep strong references to `SCStreamOutput` objects to prevent deallocation
+- Update textures asynchronously to avoid blocking capture
+- Use `CVMetalTextureCache` for efficient texture conversion
