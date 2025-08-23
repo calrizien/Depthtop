@@ -17,7 +17,14 @@ struct ImmersiveSpaceContent: CompositorContent {
 
     var body: some CompositorContent {
         CompositorLayer(configuration: self) { @MainActor layerRenderer in
-            Renderer.startRenderLoop(layerRenderer, appModel: appModel, arSession: .init(device: remoteDeviceIdentifier!))
+            guard let deviceID = remoteDeviceIdentifier else {
+                print("Error: No remote device identifier available. Ensure Vision Pro is connected.")
+                Task { @MainActor in
+                    appModel.immersiveSpaceState = .closed
+                }
+                return
+            }
+            Renderer.startRenderLoop(layerRenderer, appModel: appModel, arSession: .init(device: deviceID))
         }
     }
 }

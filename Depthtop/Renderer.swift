@@ -458,19 +458,22 @@ actor Renderer {
             renderPassDescriptor.renderTargetArrayLength = drawable.views.count
         }
 
+        var residencySet: MTLResidencySet?
         #if !targetEnvironment(simulator)
-        let residencySet = self.residencySets[uniformBufferIndex]
-        residencySet.addAllocations([
+        residencySet = self.residencySets[uniformBufferIndex]
+        residencySet?.addAllocations([
             drawable.colorTextures[0],
             drawable.depthTextures[0],
             drawableTarget.viewProjectionBuffer
         ])
-        residencySet.commit()
+        residencySet?.commit()
         #endif
 
         let commandAllocator = self.commandAllocators[uniformBufferIndex]
         commandBuffer.beginCommandBuffer(allocator: commandAllocator)
-        commandBuffer.useResidencySet(residencySet)
+        if let residencySet = residencySet {
+            commandBuffer.useResidencySet(residencySet)
+        }
 
         /// Final pass rendering code here
         guard let renderEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor) else {
@@ -571,9 +574,9 @@ actor Renderer {
 
         drawableRenderContext.endEncoding(commandEncoder: renderEncoder)
 
-        self.commandQueue.commit([commandBuffer])
-
         drawable.encodePresent()
+
+        self.commandQueue.commit([commandBuffer])
     }
 
     func updateWindowData(_ data: [WindowRenderData]) {
@@ -595,20 +598,25 @@ actor Renderer {
                 layerRenderer.waitUntilRunning()
                 continue
             } else {
+                // Update immersive space state if needed
                 Task { @MainActor in
                     if appModel.immersiveSpaceState != .open {
                         appModel.immersiveSpaceState = .open
                     }
-                    
-                    // Update window data from MainActor
+                }
+                
+                // Fetch window data in a separate task to avoid blocking render loop
+                Task { @MainActor in
                     let windowData = appModel.capturedWindows.compactMap { window -> WindowRenderData? in
                         guard let texture = window.texture else { return nil }
                         return WindowRenderData(texture: texture, modelMatrix: window.modelMatrix)
                     }
-                    Task {
-                        await self.updateWindowData(windowData)
-                    }
+                    
+                    // Update window data on the renderer actor
+                    await self.updateWindowData(windowData)
                 }
+                
+                // Continue rendering regardless of window data availability
                 autoreleasepool {
                     self.renderFrame()
                 }
