@@ -10,6 +10,7 @@ import ScreenCaptureKit
 
 struct ContentView: View {
     @Environment(AppModel.self) private var appModel
+    @Environment(\.supportsRemoteScenes) private var supportsRemoteScenes
     @State private var selectedWindows: Set<CGWindowID> = []
     
     var body: some View {
@@ -82,6 +83,19 @@ struct ContentView: View {
                         ToggleImmersiveSpaceButton()
                     }
                     .padding(.horizontal)
+                    
+                    // Vision Pro connection status
+                    if !supportsRemoteScenes {
+                        Label("Remote scenes not supported on this Mac", systemImage: "exclamationmark.triangle")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                            .padding(.horizontal)
+                    } else if appModel.immersiveSpaceState == .closed {
+                        Text("Note: Vision Pro must be connected to use spatial view")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal)
+                    }
                 }
                 .padding(.bottom)
             }

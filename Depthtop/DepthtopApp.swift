@@ -17,14 +17,17 @@ struct ImmersiveSpaceContent: CompositorContent {
 
     var body: some CompositorContent {
         CompositorLayer(configuration: self) { @MainActor layerRenderer in
-            guard let deviceID = remoteDeviceIdentifier else {
-                print("Error: No remote device identifier available. Ensure Vision Pro is connected.")
-                Task { @MainActor in
-                    appModel.immersiveSpaceState = .closed
-                }
-                return
+            // Note: remoteDeviceIdentifier will be nil when running on Mac without Vision Pro connected
+            // The template originally force-unwrapped this, but we'll handle it more gracefully
+            if let deviceID = remoteDeviceIdentifier {
+                Renderer.startRenderLoop(layerRenderer, appModel: appModel, arSession: .init(device: deviceID))
+            } else {
+                // For testing without Vision Pro, we can still start the renderer
+                // but ARKit features won't work
+                print("Warning: No Vision Pro connected. Starting renderer without ARKit session.")
+                print("To connect: On Vision Pro, go to Settings > General > Mac Virtual Display")
+                Renderer.startRenderLoop(layerRenderer, appModel: appModel, arSession: nil)
             }
-            Renderer.startRenderLoop(layerRenderer, appModel: appModel, arSession: .init(device: deviceID))
         }
     }
 }
@@ -65,8 +68,16 @@ struct DepthtopApp: App {
                 .environment(appModel)
         }
 
-        RemoteImmersiveSpace(id: appModel.immersiveSpaceID) {
+        RemoteImmersiveSpace(id: "ImmersiveSpace") {
             ImmersiveSpaceContent(appModel: appModel)
+                .onAppear {
+                    print("RemoteImmersiveSpace appeared")
+                    appModel.immersiveSpaceState = .open
+                }
+                .onDisappear {
+                    print("RemoteImmersiveSpace disappeared")
+                    appModel.immersiveSpaceState = .closed
+                }
         }
         .immersionStyle(selection: .constant(.progressive), in: .progressive)
     }

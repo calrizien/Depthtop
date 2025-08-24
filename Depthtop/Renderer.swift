@@ -57,6 +57,7 @@ final class RendererTaskExecutor: TaskExecutor {
 // Window render data that can be passed across actor boundaries
 struct WindowRenderData {
     let texture: MTLTexture
+    let textureGPUResourceID: MTLResourceID
     let modelMatrix: float4x4
 }
 
@@ -94,9 +95,16 @@ actor Renderer {
     var mesh: MTKMesh
     var quadMesh: MTKMesh!  // For window quads
     
-    var windowRenderData: [WindowRenderData] = []  // Current windows to render
+    private var _windowRenderData: [WindowRenderData] = []  // Current windows to render
+    private let windowDataLock = NSLock()
+    
+    var windowRenderData: [WindowRenderData] {
+        windowDataLock.lock()
+        defer { windowDataLock.unlock() }
+        return _windowRenderData
+    }
 
-    let worldTracking: WorldTrackingProvider
+    var worldTracking: WorldTrackingProvider?
     let layerRenderer: LayerRenderer
     let appModel: AppModel
 
@@ -176,22 +184,27 @@ actor Renderer {
         commandQueue.addResidencySet(residencySet)
         #endif
 
-        worldTracking = WorldTrackingProvider()
+        worldTracking = nil  // Will be set when ARKit session is available
     }
 
     private func startARSession(_ arSession: ARKitSession) async {
         do {
-            try await arSession.run([worldTracking])
+            worldTracking = WorldTrackingProvider()
+            try await arSession.run([worldTracking!])
         } catch {
             fatalError("Failed to initialize ARSession")
         }
     }
 
     @MainActor
-    static func startRenderLoop(_ layerRenderer: LayerRenderer, appModel: AppModel, arSession: ARKitSession) {
+    static func startRenderLoop(_ layerRenderer: LayerRenderer, appModel: AppModel, arSession: ARKitSession?) {
         Task(executorPreference: RendererTaskExecutor.shared) {
             let renderer = Renderer(layerRenderer, appModel: appModel)
-            await renderer.startARSession(arSession)
+            if let arSession = arSession {
+                await renderer.startARSession(arSession)
+            } else {
+                print("Renderer: Running without ARKit session (no Vision Pro connected)")
+            }
             await renderer.renderLoop()
         }
     }
@@ -407,7 +420,7 @@ actor Renderer {
 
     func render(drawable: LayerRenderer.Drawable, frameIndex: UInt64) {
         let time = drawable.frameTiming.presentationTime.timeInterval
-        let deviceAnchor = worldTracking.queryDeviceAnchor(atTimestamp: time)
+        let deviceAnchor = worldTracking?.queryDeviceAnchor(atTimestamp: time)
 
         drawable.deviceAnchor = deviceAnchor
 
@@ -527,14 +540,14 @@ actor Renderer {
         }
 
         // Render captured windows if any, otherwise render demo cube
-        if !windowRenderData.isEmpty {
+        if !windowRenderData.isEmpty && quadMesh != nil {
             // Render each captured window as a quad
             for windowData in windowRenderData {
                 // Update uniforms with window's transform
                 uniforms[0].modelMatrix = windowData.modelMatrix
                 
                 // Set window texture
-                self.fragmentArgumentTable.setTexture(windowData.texture.gpuResourceID, index: TextureIndex.color.rawValue)
+                self.fragmentArgumentTable.setTexture(windowData.textureGPUResourceID, index: TextureIndex.color.rawValue)
                 
                 // Update vertex buffers for quad
                 for (index, element) in quadMesh.vertexDescriptor.layouts.enumerated() {
@@ -580,7 +593,9 @@ actor Renderer {
     }
 
     func updateWindowData(_ data: [WindowRenderData]) {
-        windowRenderData = data
+        windowDataLock.lock()
+        defer { windowDataLock.unlock() }
+        _windowRenderData = data
     }
     
     func renderLoop() {
@@ -607,13 +622,34 @@ actor Renderer {
                 
                 // Fetch window data in a separate task to avoid blocking render loop
                 Task { @MainActor in
-                    let windowData = appModel.capturedWindows.compactMap { window -> WindowRenderData? in
-                        guard let texture = window.texture else { return nil }
-                        return WindowRenderData(texture: texture, modelMatrix: window.modelMatrix)
-                    }
+                    let capturedWindows = appModel.capturedWindows
                     
-                    // Update window data on the renderer actor
-                    await self.updateWindowData(windowData)
+                    // Only try to get window data if there are actually captured windows
+                    if !capturedWindows.isEmpty {
+                        print("Fetching window data: \(capturedWindows.count) captured windows")
+                        
+                        let windowData = capturedWindows.compactMap { window -> WindowRenderData? in
+                            guard let texture = window.texture else { 
+                                print("Window '\(window.title)' has no texture yet")
+                                return nil 
+                            }
+                            
+                            // Get GPU resource ID (this should be valid if texture exists)
+                            let gpuResourceID = texture.gpuResourceID
+                            
+                            print("Window '\(window.title)' has valid texture")
+                            return WindowRenderData(
+                                texture: texture,
+                                textureGPUResourceID: gpuResourceID,
+                                modelMatrix: window.modelMatrix
+                            )
+                        }
+                        
+                        print("Created \(windowData.count) window render data objects")
+                        
+                        // Update window data on the renderer actor
+                        await self.updateWindowData(windowData)
+                    }
                 }
                 
                 // Continue rendering regardless of window data availability
