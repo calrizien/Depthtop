@@ -7,6 +7,8 @@
 
 import SwiftUI
 import ScreenCaptureKit
+import Metal
+import simd
 
 /// Maintains app-wide state
 @MainActor
@@ -30,6 +32,16 @@ class AppModel {
     
     // Layout configuration for windows in 3D space
     var windowArrangement: WindowArrangement = .grid
+    
+    // Preview state
+    var previewNeedsUpdate = false
+    var previewQuality: PreviewQuality = .medium
+    
+    enum PreviewQuality: String, CaseIterable {
+        case low = "Low"
+        case medium = "Medium"
+        case high = "High"
+    }
     
     enum WindowArrangement {
         case grid
@@ -92,6 +104,24 @@ class AppModel {
             window.position = windowArrangement.calculatePosition(
                 for: index,
                 total: windows.count
+            )
+        }
+        // Notify that preview needs update
+        previewNeedsUpdate = true
+    }
+    
+    // Preview coordination
+    func notifyPreviewUpdate() {
+        previewNeedsUpdate = true
+    }
+    
+    func getWindowRenderData() -> [WindowRenderData] {
+        return capturedWindows.compactMap { window in
+            guard let texture = window.texture else { return nil }
+            return WindowRenderData(
+                texture: texture,
+                textureGPUResourceID: texture.gpuResourceID,
+                modelMatrix: window.modelMatrix
             )
         }
     }

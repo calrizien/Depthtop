@@ -31,6 +31,40 @@ xcodebuild clean -scheme Depthtop
 xcodebuild test -scheme Depthtop -destination 'platform=macOS'
 ```
 
+## Accessing Xcode Console Output from Terminal
+
+To monitor console output outside of Xcode (useful for debugging when Xcode console is problematic):
+
+### Method 1: Run the built app directly
+```bash
+# After building in Xcode or via xcodebuild, run the executable directly:
+./DerivedData/Depthtop/Build/Products/Debug/Depthtop.app/Contents/MacOS/Depthtop
+
+# Or if you know the full path:
+/Users/brandonwinston/Library/Developer/Xcode/DerivedData/Depthtop-*/Build/Products/Debug/Depthtop.app/Contents/MacOS/Depthtop
+```
+
+### Method 2: Stream logs for the running app
+```bash
+# Monitor logs from the running Depthtop process
+log stream --predicate 'process == "Depthtop"' --level debug
+
+# Or filter for specific subsystems
+log stream --predicate 'subsystem == "com.yourcompany.Depthtop"'
+```
+
+### Method 3: Build and run in one command
+```bash
+# Build and immediately run with console output
+xcodebuild -scheme Depthtop -configuration Debug && \
+./DerivedData/Depthtop/Build/Products/Debug/Depthtop.app/Contents/MacOS/Depthtop
+```
+
+This approach is particularly useful when:
+- Xcode's console is unresponsive or overwhelming
+- You need to pipe output to other tools (grep, tee, etc.)
+- You want to save logs to a file: `./path/to/Depthtop 2>&1 | tee debug.log`
+
 ## Implementation Plan
 
 ### Phase 1: Window Capture (Current Focus)

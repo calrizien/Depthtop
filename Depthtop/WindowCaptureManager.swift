@@ -67,7 +67,12 @@ class WindowCaptureManager: NSObject {
     }
     
     func startCapture(for window: SCWindow) async {
-        guard !isWindowBeingCaptured(window) else { return }
+        guard !isWindowBeingCaptured(window) else { 
+            print("Window already being captured: \(window.title ?? "Unknown")")
+            return 
+        }
+        
+        print("Starting capture for window: \(window.title ?? "Unknown") - ID: \(window.windowID)")
         
         do {
             // Configure the stream
@@ -79,6 +84,8 @@ class WindowCaptureManager: NSObject {
             config.capturesAudio = false
             config.showsCursor = false
             config.minimumFrameInterval = CMTime(value: 1, timescale: 60) // 60 FPS
+            
+            print("Stream config: \(config.width)x\(config.height) @ 60fps")
             
             // Create filter for the specific window
             let filter = SCContentFilter(desktopIndependentWindow: window)
@@ -105,7 +112,6 @@ class WindowCaptureManager: NSObject {
                 self.isCapturing = true
             }
             
-            print("Started capturing: \(window.title ?? "Unknown")")
         } catch {
             print("Failed to start capture for window: \(error)")
         }
@@ -127,7 +133,6 @@ class WindowCaptureManager: NSObject {
                 }
             }
             
-            print("Stopped capturing: \(window.title ?? "Unknown")")
         } catch {
             print("Failed to stop capture: \(error)")
         }
@@ -145,7 +150,10 @@ class WindowCaptureManager: NSObject {
     
     func updateTexture(for window: SCWindow, with sampleBuffer: CMSampleBuffer) {
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer),
-              let cache = textureCache else { return }
+              let cache = textureCache else { 
+            print("Failed to get pixel buffer or texture cache")
+            return 
+        }
         
         let width = CVPixelBufferGetWidth(pixelBuffer)
         let height = CVPixelBufferGetHeight(pixelBuffer)
@@ -166,13 +174,19 @@ class WindowCaptureManager: NSObject {
         guard status == kCVReturnSuccess,
               let cvTexture = cvTexture,
               let texture = CVMetalTextureGetTexture(cvTexture) else {
+            print("Failed to create Metal texture from pixel buffer (status: \(status))")
             return
         }
+        
+        print("Successfully created texture for window \(window.title ?? "Unknown") - size: \(width)x\(height)")
         
         Task { @MainActor in
             if let index = self.capturedWindows.firstIndex(where: { $0.window.windowID == window.windowID }) {
                 self.capturedWindows[index].texture = texture
                 self.capturedWindows[index].lastUpdate = Date()
+                print("Updated texture for captured window: \(self.capturedWindows[index].title)")
+            } else {
+                print("Warning: Received texture update for non-captured window")
             }
         }
     }
@@ -204,6 +218,7 @@ extension WindowCaptureManager: SCStreamDelegate {
 private class StreamOutput: NSObject, SCStreamOutput {
     weak var window: SCWindow?
     weak var captureManager: WindowCaptureManager?
+    private var frameCount = 0
     
     init(window: SCWindow, captureManager: WindowCaptureManager) {
         self.window = window
@@ -213,7 +228,16 @@ private class StreamOutput: NSObject, SCStreamOutput {
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
         guard type == .screen,
               let window = window,
-              let captureManager = captureManager else { return }
+              let captureManager = captureManager else { 
+            print("StreamOutput: Skipping frame - type: \(type), window: \(window != nil), manager: \(captureManager != nil)")
+            return 
+        }
+        
+        // Log only periodically to avoid spam
+        frameCount += 1
+        if frameCount % 60 == 0 {  // Log every 60 frames (once per second at 60fps)
+            print("StreamOutput: Received frame \(frameCount) for window: \(window.title ?? "Unknown")")
+        }
         
         captureManager.updateTexture(for: window, with: sampleBuffer)
     }

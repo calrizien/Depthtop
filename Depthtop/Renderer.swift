@@ -54,13 +54,6 @@ final class RendererTaskExecutor: TaskExecutor {
     static var shared: RendererTaskExecutor = RendererTaskExecutor()
 }
 
-// Window render data that can be passed across actor boundaries
-struct WindowRenderData {
-    let texture: MTLTexture
-    let textureGPUResourceID: MTLResourceID
-    let modelMatrix: float4x4
-}
-
 actor Renderer {
 
     let device: MTLDevice
@@ -76,6 +69,7 @@ actor Renderer {
 
     let dynamicUniformBuffer: MTLBuffer
     let pipelineState: MTLRenderPipelineState
+    let windowPipelineState: MTLRenderPipelineState  // Separate pipeline for window rendering
     let depthState: MTLDepthStencilState
     let colorMap: MTLTexture
 
@@ -152,6 +146,11 @@ actor Renderer {
             pipelineState = try Self.buildRenderPipeline(device: device,
                                                          layerRenderer: layerRenderer,
                                                          mtlVertexDescriptor: mtlVertexDescriptor)
+            
+            // Create separate pipeline for window rendering
+            windowPipelineState = try Self.buildWindowRenderPipeline(device: device,
+                                                                     layerRenderer: layerRenderer,
+                                                                     mtlVertexDescriptor: mtlVertexDescriptor)
         } catch {
             fatalError("Unable to compile render pipeline state.  Error info: \(error)")
         }
@@ -257,6 +256,32 @@ actor Renderer {
 
         pipelineDescriptor.maxVertexAmplificationCount = layerRenderer.properties.viewCount
 
+        return try device.makeRenderPipelineState(descriptor: pipelineDescriptor)
+    }
+    
+    static func buildWindowRenderPipeline(device: MTLDevice,
+                                          layerRenderer: LayerRenderer,
+                                          mtlVertexDescriptor: MTLVertexDescriptor) throws -> MTLRenderPipelineState {
+        /// Build a render state pipeline object for window rendering
+        
+        let library = device.makeDefaultLibrary()
+        
+        let vertexFunction = library?.makeFunction(name: "windowVertexShader")
+        let fragmentFunction = library?.makeFunction(name: "windowFragmentShader")
+        
+        let pipelineDescriptor = MTLRenderPipelineDescriptor()
+        pipelineDescriptor.label = "WindowRenderPipeline"
+        pipelineDescriptor.vertexFunction = vertexFunction
+        pipelineDescriptor.fragmentFunction = fragmentFunction
+        pipelineDescriptor.vertexDescriptor = mtlVertexDescriptor
+        pipelineDescriptor.rasterSampleCount = device.rasterSampleCount
+        
+        pipelineDescriptor.colorAttachments[0].pixelFormat = layerRenderer.configuration.colorFormat
+        pipelineDescriptor.depthAttachmentPixelFormat = layerRenderer.configuration.depthFormat
+        pipelineDescriptor.stencilAttachmentPixelFormat = layerRenderer.configuration.drawableRenderContextStencilFormat
+        
+        pipelineDescriptor.maxVertexAmplificationCount = layerRenderer.properties.viewCount
+        
         return try device.makeRenderPipelineState(descriptor: pipelineDescriptor)
     }
 
@@ -505,7 +530,8 @@ actor Renderer {
 
         renderEncoder.setFrontFacing(.counterClockwise)
 
-        renderEncoder.setRenderPipelineState(pipelineState)
+        // Will be set per object type below
+        // renderEncoder.setRenderPipelineState(pipelineState)
 
         renderEncoder.setDepthStencilState(depthState)
 
@@ -541,25 +567,32 @@ actor Renderer {
 
         // Render captured windows if any, otherwise render demo cube
         if !windowRenderData.isEmpty && quadMesh != nil {
+            print("Rendering \(windowRenderData.count) windows")
+            
+            // Use window pipeline for rendering windows
+            renderEncoder.setRenderPipelineState(windowPipelineState)
+            
+            // Update vertex buffers for quad once
+            for (index, element) in quadMesh.vertexDescriptor.layouts.enumerated() {
+                guard let layout = element as? MDLVertexBufferLayout else {
+                    fatalError("unsupported layout")
+                }
+                
+                if layout.stride != 0 {
+                    let buffer = quadMesh.vertexBuffers[index]
+                    self.vertexArgumentTable.setAddress(buffer.buffer.gpuAddress + UInt64(buffer.offset), index: index)
+                }
+            }
+            
             // Render each captured window as a quad
-            for windowData in windowRenderData {
+            for (idx, windowData) in windowRenderData.enumerated() {
+                print("  Rendering window \(idx): texture ID = \(windowData.textureGPUResourceID._impl)")
+                
                 // Update uniforms with window's transform
                 uniforms[0].modelMatrix = windowData.modelMatrix
                 
-                // Set window texture
+                // Set window texture - use the actual captured texture
                 self.fragmentArgumentTable.setTexture(windowData.textureGPUResourceID, index: TextureIndex.color.rawValue)
-                
-                // Update vertex buffers for quad
-                for (index, element) in quadMesh.vertexDescriptor.layouts.enumerated() {
-                    guard let layout = element as? MDLVertexBufferLayout else {
-                        fatalError("unsupported layout")
-                    }
-                    
-                    if layout.stride != 0 {
-                        let buffer = quadMesh.vertexBuffers[index]
-                        self.vertexArgumentTable.setAddress(buffer.buffer.gpuAddress + UInt64(buffer.offset), index: index)
-                    }
-                }
                 
                 // Draw quad
                 for submesh in quadMesh.submeshes {
@@ -572,6 +605,11 @@ actor Renderer {
             }
         } else {
             // Fallback to demo cube
+            print("No windows to render, showing demo cube")
+            
+            // Use standard pipeline for demo cube
+            renderEncoder.setRenderPipelineState(pipelineState)
+            
             self.fragmentArgumentTable.setTexture(colorMap.gpuResourceID, index: TextureIndex.color.rawValue)
             
             for submesh in mesh.submeshes {
@@ -584,11 +622,14 @@ actor Renderer {
         }
 
         renderEncoder.popDebugGroup()
-
+        
+        // End drawable context (this will also end the render encoder internally)
         drawableRenderContext.endEncoding(commandEncoder: renderEncoder)
 
+        // Encode presentation before commit
         drawable.encodePresent()
 
+        // Finally commit the command buffer
         self.commandQueue.commit([commandBuffer])
     }
 
@@ -621,35 +662,41 @@ actor Renderer {
                 }
                 
                 // Fetch window data in a separate task to avoid blocking render loop
-                Task { @MainActor in
-                    let capturedWindows = appModel.capturedWindows
-                    
-                    // Only try to get window data if there are actually captured windows
-                    if !capturedWindows.isEmpty {
-                        print("Fetching window data: \(capturedWindows.count) captured windows")
+                Task {
+                    // Capture window data from MainActor context
+                    let windowData = await MainActor.run {
+                        let capturedWindows = appModel.capturedWindows
                         
-                        let windowData = capturedWindows.compactMap { window -> WindowRenderData? in
-                            guard let texture = window.texture else { 
-                                print("Window '\(window.title)' has no texture yet")
-                                return nil 
+                        // Only try to get window data if there are actually captured windows
+                        if !capturedWindows.isEmpty {
+                            print("Fetching window data: \(capturedWindows.count) captured windows")
+                            
+                            let data = capturedWindows.compactMap { window -> WindowRenderData? in
+                                guard let texture = window.texture else { 
+                                    print("Window '\(window.title)' has no texture yet")
+                                    return nil 
+                                }
+                                
+                                // Get GPU resource ID (this should be valid if texture exists)
+                                let gpuResourceID = texture.gpuResourceID
+                                
+                                print("Window '\(window.title)' has valid texture - GPU ID: \(gpuResourceID._impl)")
+                                return WindowRenderData(
+                                    texture: texture,
+                                    textureGPUResourceID: gpuResourceID,
+                                    modelMatrix: window.modelMatrix
+                                )
                             }
                             
-                            // Get GPU resource ID (this should be valid if texture exists)
-                            let gpuResourceID = texture.gpuResourceID
-                            
-                            print("Window '\(window.title)' has valid texture")
-                            return WindowRenderData(
-                                texture: texture,
-                                textureGPUResourceID: gpuResourceID,
-                                modelMatrix: window.modelMatrix
-                            )
+                            print("Created \(data.count) window render data objects")
+                            return data
+                        } else {
+                            return [WindowRenderData]()
                         }
-                        
-                        print("Created \(windowData.count) window render data objects")
-                        
-                        // Update window data on the renderer actor
-                        await self.updateWindowData(windowData)
                     }
+                    
+                    // Now update on the renderer actor (self)
+                    self.updateWindowData(windowData)
                 }
                 
                 // Continue rendering regardless of window data availability

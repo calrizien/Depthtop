@@ -12,107 +12,125 @@ struct ContentView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(\.supportsRemoteScenes) private var supportsRemoteScenes
     @State private var selectedWindows: Set<CGWindowID> = []
+    @State private var showPreview = true
     
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 20) {
-                // Header
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Depthtop")
-                        .font(.largeTitle)
-                        .bold()
+        HSplitView {
+            // Left side: Window list and controls
+            NavigationStack {
+                VStack(spacing: 20) {
+                    // Header
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Depthtop")
+                            .font(.largeTitle)
+                            .bold()
+                        
+                        Text("Select windows to display in spatial view")
+                            .font(.headline)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal)
                     
-                    Text("Select windows to display in spatial view")
-                        .font(.headline)
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal)
-                
-                // Window list
-                ScrollView {
-                    LazyVStack(spacing: 12) {
-                        ForEach(appModel.windowCaptureManager.availableWindows, id: \.windowID) { window in
-                            WindowRow(
-                                window: window,
-                                isCapturing: appModel.windowCaptureManager.capturedWindows.contains { 
-                                    $0.window.windowID == window.windowID 
-                                },
-                                onToggle: { isOn in
-                                    Task {
-                                        if isOn {
-                                            await appModel.startCapture(for: window)
-                                        } else {
-                                            await appModel.stopCapture(for: window)
+                    // Window list
+                    ScrollView {
+                        LazyVStack(spacing: 12) {
+                            ForEach(appModel.windowCaptureManager.availableWindows, id: \.windowID) { window in
+                                WindowRow(
+                                    window: window,
+                                    isCapturing: appModel.windowCaptureManager.capturedWindows.contains { 
+                                        $0.window.windowID == window.windowID 
+                                    },
+                                    onToggle: { isOn in
+                                        Task {
+                                            if isOn {
+                                                await appModel.startCapture(for: window)
+                                            } else {
+                                                await appModel.stopCapture(for: window)
+                                            }
                                         }
                                     }
-                                }
-                            )
+                                )
+                            }
                         }
+                        .padding(.horizontal)
                     }
-                    .padding(.horizontal)
-                }
-                
-                // Controls
-                VStack(spacing: 16) {
-                    // Window arrangement picker
-                    Picker("Arrangement", selection: Binding(
-                        get: { appModel.windowArrangement },
-                        set: { 
-                            appModel.windowArrangement = $0
-                            appModel.updateWindowPositions()
-                        }
-                    )) {
-                        Text("Grid").tag(AppModel.WindowArrangement.grid)
-                        Text("Curved").tag(AppModel.WindowArrangement.curved)
-                        Text("Stack").tag(AppModel.WindowArrangement.stack)
-                    }
-                    .pickerStyle(SegmentedPickerStyle())
-                    .padding(.horizontal)
                     
-                    // Status and immersive space toggle
-                    HStack {
-                        if appModel.windowCaptureManager.isCapturing {
-                            Label("\(appModel.capturedWindows.count) windows captured", 
-                                  systemImage: "dot.radiowaves.left.and.right")
-                                .foregroundStyle(.green)
+                    // Controls
+                    VStack(spacing: 16) {
+                        // Window arrangement picker
+                        Picker("Arrangement", selection: Binding(
+                            get: { appModel.windowArrangement },
+                            set: { 
+                                appModel.windowArrangement = $0
+                                appModel.updateWindowPositions()
+                            }
+                        )) {
+                            Text("Grid").tag(AppModel.WindowArrangement.grid)
+                            Text("Curved").tag(AppModel.WindowArrangement.curved)
+                            Text("Stack").tag(AppModel.WindowArrangement.stack)
                         }
+                        .pickerStyle(SegmentedPickerStyle())
+                        .padding(.horizontal)
                         
-                        Spacer()
+                        // Status and immersive space toggle
+                        HStack {
+                            if appModel.windowCaptureManager.isCapturing {
+                                Label("\(appModel.capturedWindows.count) windows captured", 
+                                      systemImage: "dot.radiowaves.left.and.right")
+                                    .foregroundStyle(.green)
+                            }
+                            
+                            Spacer()
+                            
+                            Button(action: { showPreview.toggle() }) {
+                                Label(showPreview ? "Hide Preview" : "Show Preview", 
+                                      systemImage: showPreview ? "eye.slash" : "eye")
+                            }
+                            .buttonStyle(.borderless)
+                            
+                            ToggleImmersiveSpaceButton()
+                        }
+                        .padding(.horizontal)
                         
-                        ToggleImmersiveSpaceButton()
+                        // Vision Pro connection status
+                        if !supportsRemoteScenes {
+                            Label("Remote scenes not supported on this Mac", systemImage: "exclamationmark.triangle")
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                                .padding(.horizontal)
+                        } else if appModel.immersiveSpaceState == .closed {
+                            Text("Note: Vision Pro must be connected to use spatial view")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal)
+                        }
                     }
-                    .padding(.horizontal)
-                    
-                    // Vision Pro connection status
-                    if !supportsRemoteScenes {
-                        Label("Remote scenes not supported on this Mac", systemImage: "exclamationmark.triangle")
-                            .font(.caption)
-                            .foregroundStyle(.orange)
-                            .padding(.horizontal)
-                    } else if appModel.immersiveSpaceState == .closed {
-                        Text("Note: Vision Pro must be connected to use spatial view")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal)
+                    .padding(.bottom)
+                }
+                .task {
+                    await appModel.refreshWindows()
+                }
+                .toolbar {
+                    ToolbarItem(placement: .primaryAction) {
+                        Button("Refresh") {
+                            Task {
+                                await appModel.refreshWindows()
+                            }
+                        }
                     }
                 }
-                .padding(.bottom)
             }
-            .task {
-                await appModel.refreshWindows()
-            }
-            .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    Button("Refresh") {
-                        Task {
-                            await appModel.refreshWindows()
-                        }
-                    }
-                }
+            .frame(minWidth: 400)
+            
+            // Right side: 3D Preview
+            if showPreview {
+                RealityKitPreviewView()
+                    .environment(appModel)
+                    .frame(minWidth: 400)
             }
         }
-        .frame(width: 600, height: 500)
+        .frame(width: showPreview ? 1000 : 600, height: 600)
     }
 }
 
