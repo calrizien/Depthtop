@@ -13,6 +13,7 @@ import ScreenCaptureKit
 import CoreImage
 import IOSurface
 import Combine
+import simd
 
 // MARK: - Timeout Utilities
 
@@ -276,10 +277,10 @@ struct RealityKitPreviewView: View {
         setupLighting(content: content)
         
         // Add ground plane for reference
-        // setupGroundPlane(content: content)  // DISABLED: Debugging window visibility
+        setupGroundPlane(content: content)  // ENABLED: Helps with spatial orientation
         
         // Debug spheres to verify scene is working
-        // addDebugSpheres(content: content)  // DISABLED: Interfering with window entity visibility
+        addDebugSpheres(content: content)  // ENABLED: Helps verify camera view
         
         // Setup camera EXPLICITLY for macOS non-AR mode
         setupCamera(content: content)
@@ -493,8 +494,10 @@ struct RealityKitPreviewView: View {
             let windowID = capturedWindow.window.windowID
             
             if let existingEntity = entityStorage.windowEntities[windowID] {
-                // Update texture if available
-                updateWindowTexture(existingEntity, with: capturedWindow)
+                // Update texture if available and changed
+                if capturedWindow.texture != nil {
+                    updateWindowTexture(existingEntity, with: capturedWindow)
+                }
             } else {
                 // Create new entity SYNCHRONOUSLY
                 print("✨ Creating entity for window: \(capturedWindow.title)")
@@ -509,16 +512,31 @@ struct RealityKitPreviewView: View {
                 print("  Position: \(newEntity.position)")
                 print("  Children in root: \(rootEntity.children.count)")
                 
-                // Update texture asynchronously if available
-                if capturedWindow.texture != nil {
-                    print("🎨 Surface available, starting texture update task...")
+                // Update texture immediately if available
+                if let texture = capturedWindow.texture {
+                    print("🎨 Texture available, updating material immediately...")
+                    // Apply texture in a more direct way
                     Task { @MainActor in
-                        print("🎨 Inside Task, calling updateEntityTextureFromCapture...")
-                        await updateEntityTextureFromCapture(newEntity, with: capturedWindow)
-                        print("🎨 Texture update task complete")
+                        print("🔥 Starting texture application task...")
+                        if let modelEntity = newEntity as? ModelEntity {
+                            // Try the simplest possible approach first
+                            if let material = await createSimpleTexturedMaterial(from: texture) {
+                                print("🎨 Got material, applying to entity...")
+                                if let mesh = modelEntity.model?.mesh {
+                                    modelEntity.model = ModelComponent(mesh: mesh, materials: [material])
+                                    print("✅ Applied texture material successfully!")
+                                } else {
+                                    print("❌ No mesh found on model entity")
+                                }
+                            } else {
+                                print("❌ Failed to create material from texture")
+                            }
+                        } else {
+                            print("❌ Entity is not a ModelEntity")
+                        }
                     }
                 } else {
-                    print("⚠️ No surface available for window, skipping texture update")
+                    print("⚠️ No texture available for window, skipping texture update")
                 }
             }
         }
@@ -702,12 +720,21 @@ struct RealityKitPreviewView: View {
         print("   Aspect ratio: \(aspectRatio)")
         print("   Entity dimensions: \(width) x \(height)")
         
-        // Create a VERY large, very obvious plane mesh
-        let mesh = MeshResource.generatePlane(width: 5.0, depth: 3.0, cornerRadius: 0.0)
+        // Create plane mesh with window's aspect ratio
+        let mesh = MeshResource.generatePlane(width: width, depth: height, cornerRadius: 0.05)
         
-        // Use VERY bright debug material to make entity visible
-        let material = SimpleMaterial(color: .init(red: 1.0, green: 0.0, blue: 1.0, alpha: 1.0), roughness: 0.0, isMetallic: false)
-        print("🔷 Created bright MAGENTA debug material (indicates no texture yet)")
+        // Check if we have a texture and try to use it immediately
+        var material: SimpleMaterial
+        if let texture = window.texture {
+            print("🎨 Window has texture! Size: \(texture.width)x\(texture.height)")
+            // Try to create a simple colored material for now
+            material = SimpleMaterial(color: .init(red: 0.2, green: 1.0, blue: 0.2, alpha: 1.0), roughness: 0.0, isMetallic: false)
+            print("🟢 Created GREEN material (texture available but not converted yet)")
+        } else {
+            print("⚠️ Window has NO texture")
+            material = SimpleMaterial(color: .init(red: 1.0, green: 0.0, blue: 1.0, alpha: 1.0), roughness: 0.0, isMetallic: false)
+            print("🔷 Created bright MAGENTA debug material (no texture available)")
+        }
         
         // Create model entity
         let entity = ModelEntity(mesh: mesh, materials: [material])
@@ -732,13 +759,14 @@ struct RealityKitPreviewView: View {
         let xOffset = Float(col) * horizontalSpacing - (Float(totalCols - 1) * horizontalSpacing / 2)
         let yOffset = -Float(row) * verticalSpacing + 2.0  // Start higher up
         
-        // TEMP DEBUG: Position window right in front of camera where we can definitely see it
-        entity.position = [0, 0, -1.5]  // Much closer to camera
-        print("🔍 DEBUG: Forcing window position to (0, 0, -1.5) to ensure visibility")
+        // Position windows in a grid arrangement
+        entity.position = [xOffset, yOffset, 0]  // Use calculated grid position
+        print("🔍 DEBUG: Positioned window at (\(xOffset), \(yOffset), 0)")
         
-        // TEMP DEBUG: Don't rotate - keep plane flat for easier debugging
-        // entity.orientation = simd_quatf(angle: -.pi/2, axis: [1, 0, 0])
-        print("🔍 DEBUG: Keeping plane flat (no rotation) for easier debugging")
+        // Rotate plane to stand upright (default plane lies flat on XZ plane)
+        // We need to rotate 90 degrees around X axis to make it vertical
+        entity.orientation = simd_quatf(angle: -.pi/2, axis: [1, 0, 0])
+        print("🔍 DEBUG: Rotated plane to stand upright (90° around X axis)")
         
         print("📍 Positioned window '\(window.title)' at: \(entity.position)")
         
@@ -797,6 +825,15 @@ struct RealityKitPreviewView: View {
     }
     
     @MainActor
+    private func createSimpleTexturedMaterial(from metalTexture: MTLTexture) async -> SimpleMaterial? {
+        print("🚀 SIMPLE: Creating textured material...")
+        
+        // The file approach works reliably on macOS RealityKit
+        // Direct CGImage to TextureResource has compatibility issues
+        return await createMaterialViaTemporaryFile(from: metalTexture)
+    }
+    
+    @MainActor
     private func createMaterial(from metalTexture: MTLTexture) async -> SimpleMaterial? {
         print("\n🎨 === CREATING MATERIAL FROM METAL TEXTURE ===")
         print("🎯 Texture: \(metalTexture.width)x\(metalTexture.height), format: \(metalTexture.pixelFormat)")
@@ -816,45 +853,160 @@ struct RealityKitPreviewView: View {
     private func createTextureResourceFromMetal(metalTexture: MTLTexture) async -> SimpleMaterial? {
         print("🔧 Converting Metal texture to TextureResource...")
         
-        // Create CIImage from Metal texture
-        guard let ciImage = CIImage(mtlTexture: metalTexture, options: [
-            .colorSpace: CGColorSpace(name: CGColorSpace.sRGB) as Any
-        ]) else {
-            print("❌ Failed to create CIImage from Metal texture")
-            return SimpleMaterial(color: .init(red: 1.0, green: 0.5, blue: 0.0, alpha: 1.0), roughness: 0.3, isMetallic: false)
+        // APPROACH 1: Standardize the CGImage to fix color space/format issues
+        guard let standardizedCGImage = createStandardizedCGImage(from: metalTexture) else {
+            print("❌ Failed to create standardized CGImage")
+            
+            // APPROACH 2: Fallback to temporary file if direct conversion fails
+            return await createMaterialViaTemporaryFile(from: metalTexture)
         }
         
-        // Create CIContext (reuse if possible for performance)
-        let ciContext = CIContext(options: [
-            .useSoftwareRenderer: false
-        ])
+        print("✅ Created standardized CGImage: \(standardizedCGImage.width)x\(standardizedCGImage.height)")
         
-        let renderRect = CGRect(x: 0, y: 0, width: metalTexture.width, height: metalTexture.height)
-        
-        // Create CGImage from CIImage
-        guard let cgImage = ciContext.createCGImage(ciImage, from: renderRect) else {
-            print("❌ Failed to create CGImage from CIImage")
-            return SimpleMaterial(color: .init(red: 0.5, green: 1.0, blue: 0.5, alpha: 1.0), roughness: 0.3, isMetallic: false)
-        }
-        
-        print("✅ Created CGImage: \(cgImage.width)x\(cgImage.height)")
-        
-        // Create TextureResource from CGImage
+        // Create TextureResource from CGImage with proper options
         do {
-            let options = TextureResource.CreateOptions(semantic: .color)
-            let textureResource = try await TextureResource(image: cgImage, options: options)
+            // Use init instead of generate (generate doesn't exist in macOS RealityKit)
+            let textureResource = try await TextureResource(
+                image: standardizedCGImage,
+                options: TextureResource.CreateOptions(semantic: .color)
+            )
             
             print("✅ Created TextureResource successfully")
             
             var material = SimpleMaterial()
             material.color = SimpleMaterial.BaseColor(texture: MaterialParameters.Texture(textureResource))
             material.roughness = 0.3
+            material.metallic = 0.0
             
             print("✅ Created SimpleMaterial with texture")
             return material
             
         } catch {
-            print("❌ TextureResource creation failed: \(error)")
+            print("❌ TextureResource.generate failed: \(error)")
+            
+            // Try fallback approach
+            return await createMaterialViaTemporaryFile(from: metalTexture)
+        }
+    }
+    
+    @MainActor
+    private func createStandardizedCGImage(from metalTexture: MTLTexture) -> CGImage? {
+        print("📐 Standardizing CGImage from Metal texture...")
+        
+        // First convert Metal texture to CIImage
+        guard let ciImage = CIImage(mtlTexture: metalTexture, options: [
+            .colorSpace: CGColorSpace(name: CGColorSpace.sRGB) as Any
+        ]) else {
+            print("❌ Failed to create CIImage from Metal texture")
+            return nil
+        }
+        
+        // Create CIContext with specific options for macOS
+        let ciContext = CIContext(options: [
+            .workingColorSpace: CGColorSpace(name: CGColorSpace.sRGB) as Any,
+            .outputColorSpace: CGColorSpace(name: CGColorSpace.sRGB) as Any,
+            .useSoftwareRenderer: false,
+            .cacheIntermediates: false
+        ])
+        
+        let renderRect = CGRect(x: 0, y: 0, width: metalTexture.width, height: metalTexture.height)
+        
+        // First get CGImage from CIContext
+        guard let initialCGImage = ciContext.createCGImage(ciImage, from: renderRect) else {
+            print("❌ Failed to create initial CGImage from CIImage")
+            return nil
+        }
+        
+        // Now standardize it to ensure proper format for RealityKit
+        let width = initialCGImage.width
+        let height = initialCGImage.height
+        
+        // Create a new context with exact specifications RealityKit expects
+        guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) else {
+            print("❌ Failed to create sRGB color space")
+            return nil
+        }
+        
+        // Use premultiplied first alpha (ARGB) format as per Perplexity recommendations
+        let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue)
+        
+        guard let context = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: width * 4,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo.rawValue
+        ) else {
+            print("❌ Failed to create standardized CGContext")
+            return nil
+        }
+        
+        // Draw the image into the standardized context
+        context.draw(initialCGImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+        
+        // Get the standardized CGImage
+        guard let standardizedImage = context.makeImage() else {
+            print("❌ Failed to create standardized CGImage from context")
+            return nil
+        }
+        
+        print("✅ Standardized CGImage created with proper format")
+        return standardizedImage
+    }
+    
+    @MainActor
+    private func createMaterialViaTemporaryFile(from metalTexture: MTLTexture) async -> SimpleMaterial? {
+        print("💾 Fallback: Creating material via temporary file...")
+        
+        // First get a CGImage (even if not perfectly standardized)
+        guard let ciImage = CIImage(mtlTexture: metalTexture, options: [:]) else {
+            print("❌ Failed to create CIImage for fallback")
+            return SimpleMaterial(color: .init(red: 1.0, green: 0.0, blue: 0.0, alpha: 1.0), roughness: 0.3, isMetallic: false)
+        }
+        
+        let ciContext = CIContext()
+        let renderRect = CGRect(x: 0, y: 0, width: metalTexture.width, height: metalTexture.height)
+        
+        guard let cgImage = ciContext.createCGImage(ciImage, from: renderRect) else {
+            print("❌ Failed to create CGImage for fallback")
+            return SimpleMaterial(color: .init(red: 1.0, green: 0.0, blue: 0.0, alpha: 1.0), roughness: 0.3, isMetallic: false)
+        }
+        
+        // Convert to PNG data
+        let nsImage = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
+        guard let tiffData = nsImage.tiffRepresentation,
+              let bitmapRep = NSBitmapImageRep(data: tiffData),
+              let pngData = bitmapRep.representation(using: .png, properties: [:]) else {
+            print("❌ Failed to create PNG data")
+            return SimpleMaterial(color: .init(red: 1.0, green: 0.0, blue: 0.0, alpha: 1.0), roughness: 0.3, isMetallic: false)
+        }
+        
+        // Save to temporary file
+        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("texture_\(UUID().uuidString).png")
+        
+        do {
+            try pngData.write(to: tempURL)
+            print("✅ Saved texture to temporary file: \(tempURL.lastPathComponent)")
+            
+            // Load TextureResource from file
+            let textureResource = try await TextureResource.load(contentsOf: tempURL)
+            
+            // Clean up temp file
+            try? FileManager.default.removeItem(at: tempURL)
+            
+            var material = SimpleMaterial()
+            material.color = SimpleMaterial.BaseColor(texture: MaterialParameters.Texture(textureResource))
+            material.roughness = 0.3
+            material.metallic = 0.0
+            
+            print("✅ Created SimpleMaterial via temporary file approach")
+            return material
+            
+        } catch {
+            print("❌ Failed to create texture via temporary file: \(error)")
+            try? FileManager.default.removeItem(at: tempURL)
             return SimpleMaterial(color: .init(red: 0.8, green: 0.2, blue: 0.8, alpha: 1.0), roughness: 0.3, isMetallic: false)
         }
     }
