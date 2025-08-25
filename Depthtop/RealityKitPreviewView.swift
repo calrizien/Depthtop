@@ -723,17 +723,23 @@ struct RealityKitPreviewView: View {
         // Create plane mesh with window's aspect ratio
         let mesh = MeshResource.generatePlane(width: width, depth: height, cornerRadius: 0.05)
         
-        // Check if we have a texture and try to use it immediately
-        var material: SimpleMaterial
+        // Start with a bright visible material - use PhysicallyBasedMaterial for double-sided support
+        var material: RealityKit.Material
         if let texture = window.texture {
             print("🎨 Window has texture! Size: \(texture.width)x\(texture.height)")
-            // Try to create a simple colored material for now
-            material = SimpleMaterial(color: .init(red: 0.2, green: 1.0, blue: 0.2, alpha: 1.0), roughness: 0.0, isMetallic: false)
-            print("🟢 Created GREEN material (texture available but not converted yet)")
+            // Use PhysicallyBasedMaterial with double-sided rendering
+            var pbMaterial = PhysicallyBasedMaterial()
+            pbMaterial.baseColor = PhysicallyBasedMaterial.BaseColor(tint: .white)
+            pbMaterial.faceCulling = .none  // CRITICAL: Make double-sided to fix visibility
+            material = pbMaterial
+            print("⚪ Created WHITE double-sided material (texture will be applied async)")
         } else {
             print("⚠️ Window has NO texture")
-            material = SimpleMaterial(color: .init(red: 1.0, green: 0.0, blue: 1.0, alpha: 1.0), roughness: 0.0, isMetallic: false)
-            print("🔷 Created bright MAGENTA debug material (no texture available)")
+            var pbMaterial = PhysicallyBasedMaterial()
+            pbMaterial.baseColor = PhysicallyBasedMaterial.BaseColor(tint: NSColor(red: 1.0, green: 0.0, blue: 1.0, alpha: 1.0))
+            pbMaterial.faceCulling = .none  // CRITICAL: Make double-sided
+            material = pbMaterial
+            print("🔷 Created MAGENTA double-sided debug material (no texture available)")
         }
         
         // Create model entity
@@ -759,14 +765,16 @@ struct RealityKitPreviewView: View {
         let xOffset = Float(col) * horizontalSpacing - (Float(totalCols - 1) * horizontalSpacing / 2)
         let yOffset = -Float(row) * verticalSpacing + 2.0  // Start higher up
         
-        // Position windows in a grid arrangement
-        entity.position = [xOffset, yOffset, 0]  // Use calculated grid position
-        print("🔍 DEBUG: Positioned window at (\(xOffset), \(yOffset), 0)")
+        // Position windows more visibly in front of camera
+        // Camera is at (0, 0, 5) looking at origin, so place windows between
+        entity.position = [xOffset, yOffset + 1.0, 2.0]  // Closer to camera, above ground
+        print("🔍 DEBUG: Positioned window at (\(xOffset), \(yOffset + 1.0), 2.0)")
         
-        // Rotate plane to stand upright (default plane lies flat on XZ plane)
-        // We need to rotate 90 degrees around X axis to make it vertical
-        entity.orientation = simd_quatf(angle: -.pi/2, axis: [1, 0, 0])
-        print("🔍 DEBUG: Rotated plane to stand upright (90° around X axis)")
+        // Rotate plane to stand upright and face camera
+        // Default plane lies flat on XZ plane, rotate to make vertical and face forward
+        // Rotate 90 degrees around X axis but positive to face the camera correctly
+        entity.orientation = simd_quatf(angle: .pi/2, axis: [1, 0, 0])
+        print("🔍 DEBUG: Rotated plane to stand upright facing camera (+90° around X axis)")
         
         print("📍 Positioned window '\(window.title)' at: \(entity.position)")
         
@@ -990,8 +998,8 @@ struct RealityKitPreviewView: View {
             try pngData.write(to: tempURL)
             print("✅ Saved texture to temporary file: \(tempURL.lastPathComponent)")
             
-            // Load TextureResource from file
-            let textureResource = try await TextureResource.load(contentsOf: tempURL)
+            // Load TextureResource from file using async initializer
+            let textureResource = try await TextureResource(contentsOf: tempURL)
             
             // Clean up temp file
             try? FileManager.default.removeItem(at: tempURL)
