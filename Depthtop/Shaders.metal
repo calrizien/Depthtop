@@ -74,6 +74,12 @@ vertex ColorInOut windowVertexShader(Vertex in [[stage_in]],
 fragment float4 windowFragmentShader(ColorInOut in [[stage_in]],
                                      texture2d<float> windowTexture [[ texture(TextureIndexColor) ]])
 {
+    // DIAGNOSTIC: Force output red to test if shader is being used
+    // If the screen turns red, the pipeline is working and the issue is texture binding
+    // If it stays black, the pipeline is not being used
+    return float4(1.0, 0.0, 0.0, 1.0); // FORCE RED OUTPUT FOR TESTING
+    
+    /*
     constexpr sampler windowSampler(address::clamp_to_edge,
                                     mip_filter::linear,
                                     mag_filter::linear,
@@ -93,6 +99,7 @@ fragment float4 windowFragmentShader(ColorInOut in [[stage_in]],
     color.a = 1.0;
     
     return color;
+    */
 }
 
 // MARK: - Preview Shaders
@@ -133,6 +140,12 @@ vertex PreviewVertexOut previewVertexShader(uint vertexID [[vertex_id]],
 
 fragment float4 previewFragmentShader(PreviewVertexOut in [[stage_in]],
                                      texture2d<half> texture [[texture(0)]]) {
+    // DIAGNOSTIC: Force output green to test if preview shader is being used
+    // If the preview turns green, the pipeline is working
+    // If it stays black, the preview pipeline is not being used
+    return float4(0.0, 1.0, 0.0, 1.0); // FORCE GREEN OUTPUT FOR TESTING
+    
+    /*
     constexpr sampler textureSampler(mag_filter::linear, min_filter::linear);
     
     if (!is_null_texture(texture)) {
@@ -141,4 +154,5 @@ fragment float4 previewFragmentShader(PreviewVertexOut in [[stage_in]],
         // Default gray color if no texture
         return float4(0.3, 0.3, 0.3, 1.0);
     }
+    */
 }

@@ -61,6 +61,11 @@ extension ImmersiveSpaceContent: CompositorLayerConfiguration {
 struct DepthtopApp: App {
 
     @State private var appModel = AppModel()
+    
+    init() {
+        print("🚀 === DEPTHTOP APP STARTING ===")
+        print("📅 Started at: \(Date())")
+    }
 
     var body: some Scene {
         WindowGroup {

@@ -3,7 +3,10 @@
     "allow": [
       "mcp__apple-doc-mcp__search_symbols",
       "mcp__apple-doc-mcp__list_technologies",
-      "mcp__apple-doc-mcp__get_documentation"
+      "mcp__apple-doc-mcp__get_documentation",
+      "WebSearch",
+      "Read(//Users/brandonwinston/Developer/Projects/VisionOS/Depthtop-archived_build/Depthtop/**)",
+      "Read(//Users/brandonwinston/Developer/Testing/VisionPro/CapturingScreenContentInMacOS/**)"
     ],
     "deny": [],
     "ask": []

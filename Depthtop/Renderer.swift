@@ -9,6 +9,19 @@ import CompositorServices
 import Metal
 import MetalKit
 import simd
+import IOSurface
+
+// Helper function to create MTLTexture from IOSurface
+nonisolated func createTextureFromSurface(_ surface: IOSurface, device: MTLDevice) -> MTLTexture? {
+    let descriptor = MTLTextureDescriptor()
+    descriptor.width = surface.width
+    descriptor.height = surface.height
+    descriptor.pixelFormat = .bgra8Unorm  // ScreenCaptureKit uses BGRA format
+    descriptor.usage = [.shaderRead]
+    descriptor.storageMode = .shared
+    
+    return device.makeTexture(descriptor: descriptor, iosurface: surface, plane: 0)
+}
 
 // The 256 byte aligned size of our uniform structure
 nonisolated let alignedUniformsSize = (MemoryLayout<Uniforms>.size + 0xFF) & -0x100
@@ -58,7 +71,7 @@ actor Renderer {
 
     let device: MTLDevice
     let commandQueue: MTL4CommandQueue
-    let commandBuffer: MTL4CommandBuffer
+    // Remove persistent commandBuffer - create per-frame instead
     let commandAllocators: [MTL4CommandAllocator]
     let vertexArgumentTable: MTL4ArgumentTable
     let fragmentArgumentTable: MTL4ArgumentTable
@@ -109,7 +122,7 @@ actor Renderer {
 
         let device = self.device
         self.commandQueue = layerRenderer.commandQueue
-        self.commandBuffer = device.makeCommandBuffer()!
+        // Remove persistent commandBuffer - create per-frame instead
         self.commandAllocators = (0...maxBuffersInFlight).map { _ in device.makeCommandAllocator()! }
 
         let argTableDesc = MTL4ArgumentTableDescriptor()
@@ -508,6 +521,13 @@ actor Renderer {
         #endif
 
         let commandAllocator = self.commandAllocators[uniformBufferIndex]
+        
+        // Create command buffer per-frame to avoid memory leak
+        guard let commandBuffer = device.makeCommandBuffer() else {
+            print("Failed to create command buffer")
+            return
+        }
+        
         commandBuffer.beginCommandBuffer(allocator: commandAllocator)
         if let residencySet = residencySet {
             commandBuffer.useResidencySet(residencySet)
@@ -630,6 +650,8 @@ actor Renderer {
         drawable.encodePresent()
 
         // Finally commit the command buffer
+        // Command buffer will be automatically released after commit/completion
+        
         self.commandQueue.commit([commandBuffer])
     }
 
@@ -639,8 +661,19 @@ actor Renderer {
         _windowRenderData = data
     }
     
-    func renderLoop() {
-        while true {
+    private var shouldStop = false
+    
+    func stop() {
+        shouldStop = true
+    }
+    
+    func renderLoop() async {
+        // Fetch window data once before loop to avoid creating excessive tasks
+        Task {
+            await updateWindowDataFromMainActor()
+        }
+        
+        while !shouldStop {
             if layerRenderer.state == .invalidated {
                 print("Layer is invalidated")
                 Task { @MainActor in
@@ -654,49 +687,12 @@ actor Renderer {
                 layerRenderer.waitUntilRunning()
                 continue
             } else {
-                // Update immersive space state if needed
-                Task { @MainActor in
-                    if appModel.immersiveSpaceState != .open {
+                // Update immersive space state if needed (only once) 
+                let needsStateUpdate = await MainActor.run { appModel.immersiveSpaceState != .open }
+                if needsStateUpdate {
+                    Task { @MainActor in
                         appModel.immersiveSpaceState = .open
                     }
-                }
-                
-                // Fetch window data in a separate task to avoid blocking render loop
-                Task {
-                    // Capture window data from MainActor context
-                    let windowData = await MainActor.run {
-                        let capturedWindows = appModel.capturedWindows
-                        
-                        // Only try to get window data if there are actually captured windows
-                        if !capturedWindows.isEmpty {
-                            print("Fetching window data: \(capturedWindows.count) captured windows")
-                            
-                            let data = capturedWindows.compactMap { window -> WindowRenderData? in
-                                guard let texture = window.texture else { 
-                                    print("Window '\(window.title)' has no texture yet")
-                                    return nil 
-                                }
-                                
-                                // Get GPU resource ID (this should be valid if texture exists)
-                                let gpuResourceID = texture.gpuResourceID
-                                
-                                print("Window '\(window.title)' has valid texture - GPU ID: \(gpuResourceID._impl)")
-                                return WindowRenderData(
-                                    texture: texture,
-                                    textureGPUResourceID: gpuResourceID,
-                                    modelMatrix: window.modelMatrix
-                                )
-                            }
-                            
-                            print("Created \(data.count) window render data objects")
-                            return data
-                        } else {
-                            return [WindowRenderData]()
-                        }
-                    }
-                    
-                    // Now update on the renderer actor (self)
-                    self.updateWindowData(windowData)
                 }
                 
                 // Continue rendering regardless of window data availability
@@ -705,6 +701,52 @@ actor Renderer {
                 }
             }
         }
+    }
+    
+    private func updateWindowDataFromMainActor() async {
+        let windowData = await MainActor.run {
+            let capturedWindows = appModel.capturedWindows
+            
+            // Only try to get window data if there are actually captured windows
+            if !capturedWindows.isEmpty {
+                print("Fetching window data: \(capturedWindows.count) captured windows")
+                
+                let data = capturedWindows.compactMap { window -> WindowRenderData? in
+                    guard let surface = window.surface else { 
+                        print("Window '\(window.title)' has no surface yet")
+                        return nil 
+                    }
+                    
+                    // Create MTLTexture from IOSurface
+                    guard let texture = createTextureFromSurface(surface, device: device) else {
+                        print("Window '\(window.title)' failed to create texture from surface")
+                        return nil
+                    }
+                    
+                    // Get GPU resource ID (this should be valid if texture exists)
+                    let gpuResourceID = texture.gpuResourceID
+                    
+                    print("Window '\(window.title)' has valid texture - GPU ID: \(gpuResourceID._impl)")
+                    return WindowRenderData(
+                        texture: texture,
+                        textureGPUResourceID: gpuResourceID,
+                        modelMatrix: window.modelMatrix
+                    )
+                }
+                
+                print("Created \(data.count) window render data objects")
+                return data
+            } else {
+                return [WindowRenderData]()
+            }
+        }
+        
+        self.updateWindowData(windowData)
+    }
+    
+    deinit {
+        print("🗑️ Renderer is being deallocated")
+        shouldStop = true
     }
 }
 

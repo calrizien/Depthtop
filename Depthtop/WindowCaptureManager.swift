@@ -16,23 +16,21 @@ import SwiftUI
 @Observable
 class WindowCaptureManager: NSObject {
     var availableWindows: [SCWindow] = []
-    var capturedWindows: [CapturedWindow] = []
+    // Removed capturedWindows - now managed by AppModel
     var isCapturing = false
     
-    private let device: MTLDevice
-    private var textureCache: CVMetalTextureCache?
+    // Callbacks for AppModel to receive updates
+    var onCaptureStarted: ((SCWindow) -> Void)?
+    var onCaptureStopped: ((CGWindowID) -> Void)?
+    var onFrameUpdated: ((CGWindowID, IOSurface, CGRect, CGFloat, CGFloat) -> Void)?
+    
     private var streams: [SCWindow: SCStream] = [:]
     private var streamOutputs: [SCWindow: StreamOutput] = [:]  // Keep strong reference to outputs
     private let queue = DispatchQueue(label: "WindowCaptureManager.queue")
     
     override init() {
-        guard let device = MTLCreateSystemDefaultDevice() else {
-            fatalError("Metal is not supported")
-        }
-        self.device = device
         super.init()
-        
-        CVMetalTextureCacheCreate(nil, nil, device, nil, &textureCache)
+        print("🔧 Initializing WindowCaptureManager for IOSurface-based capture")
     }
     
     func refreshAvailableWindows() async {
@@ -41,6 +39,7 @@ class WindowCaptureManager: NSObject {
             
             // Filter out our own app and system windows
             let ourBundleID = Bundle.main.bundleIdentifier
+            
             let windows = content.windows.filter { window in
                 // Exclude our own windows
                 if let app = window.owningApplication,
@@ -55,7 +54,54 @@ class WindowCaptureManager: NSObject {
                 }
                 
                 // Only include windows with titles
-                return window.title != nil && !window.title!.isEmpty
+                guard let title = window.title, !title.isEmpty else {
+                    return false
+                }
+                
+                // Exclude system/utility windows based on title patterns
+                let excludedPatterns = [
+                    "Wallpaper",
+                    "Backstop",
+                    "Shield",
+                    "Display 1",
+                    "Display 2",
+                    "Packages Display",
+                    "Offscreen",
+                    "System Status Item Clone",
+                    "underbelly",
+                    "Menubar"
+                ]
+                
+                for pattern in excludedPatterns {
+                    if title.contains(pattern) {
+                        return false
+                    }
+                }
+                
+                // Exclude windows from known system/utility apps
+                if let bundleID = window.owningApplication?.bundleIdentifier {
+                    let excludedBundleIDs = [
+                        "com.apple.WindowServer",
+                        "com.apple.dock",
+                        "com.apple.finder", // Exclude desktop windows
+                        "com.apple.systemuiserver",
+                        "com.apple.controlcenter",
+                        "com.apple.notificationcenterui"
+                    ]
+                    
+                    for excludedID in excludedBundleIDs {
+                        if bundleID.contains(excludedID) {
+                            return false
+                        }
+                    }
+                }
+                
+                return true
+            }
+            
+            // Only print summary when we have reasonable window count
+            if content.windows.count < 100 {
+                print("📊 Found \(windows.count) real windows (filtered from \(content.windows.count) total)")
             }
             
             await MainActor.run {
@@ -72,20 +118,51 @@ class WindowCaptureManager: NSObject {
             return 
         }
         
-        print("Starting capture for window: \(window.title ?? "Unknown") - ID: \(window.windowID)")
+        // Limit concurrent streams based on research findings (3-8 recommended, 2-4 for full-res)
+        let maxStreams = 4 // Conservative limit for full-resolution captures
+        guard streams.count < maxStreams else {
+            print("⚠️ Stream limit reached (\(maxStreams)). Cannot start capture for: \(window.title ?? "Unknown")")
+            return
+        }
+        
+        print("Starting capture for window: \(window.title ?? "Unknown") - ID: \(window.windowID) (current streams: \(streams.count))")
         
         do {
-            // Configure the stream
+            // Configure the stream with optimized settings for Metal texture conversion
             let config = SCStreamConfiguration()
-            config.width = Int(window.frame.width) * 2 // Retina resolution
-            config.height = Int(window.frame.height) * 2
+            
+            // Calculate optimal resolution based on window size and display scale
+            let windowFrame = window.frame
+            let baseWidth = Int(windowFrame.width)
+            let baseHeight = Int(windowFrame.height)
+            
+            // Use 2x for Retina displays, but cap at reasonable maximum
+            let maxDimension = 2048  // Prevent excessive memory usage
+            let scale = min(2.0, min(Double(maxDimension) / Double(baseWidth), Double(maxDimension) / Double(baseHeight)))
+            
+            config.width = Int(Double(baseWidth) * scale)
+            config.height = Int(Double(baseHeight) * scale)
+            
+            // Use BGRA format which is optimal for Metal on Apple Silicon
             config.pixelFormat = kCVPixelFormatType_32BGRA
-            config.colorSpaceName = CGColorSpace.sRGB
+            
+            // Set color space to match our Metal device capabilities
+            config.colorSpaceName = CGColorSpace.displayP3  // Better color gamut for modern displays
+            
+            // Optimize for our use case
             config.capturesAudio = false
             config.showsCursor = false
-            config.minimumFrameInterval = CMTime(value: 1, timescale: 60) // 60 FPS
             
-            print("Stream config: \(config.width)x\(config.height) @ 60fps")
+            // Set frame rate for smooth capture but not excessive GPU load
+            config.minimumFrameInterval = CMTime(value: 1, timescale: 30) // 30 FPS for balance
+            
+            // Enable queue depth for better throughput
+            config.queueDepth = 3
+            
+            print("📹 Stream config for '\(window.title ?? "Unknown")':")
+            print("   Original size: \(baseWidth)x\(baseHeight)")
+            print("   Capture size: \(config.width)x\(config.height) (scale: \(scale))")
+            print("   Format: BGRA, Color space: Display P3, FPS: 30")
             
             // Create filter for the specific window
             let filter = SCContentFilter(desktopIndependentWindow: window)
@@ -103,12 +180,8 @@ class WindowCaptureManager: NSObject {
             await MainActor.run {
                 self.streams[window] = stream
                 self.streamOutputs[window] = output  // Store the output to prevent deallocation
-                let capturedWindow = CapturedWindow(
-                    window: window,
-                    texture: nil,
-                    lastUpdate: Date()
-                )
-                self.capturedWindows.append(capturedWindow)
+                // Notify AppModel that capture has started
+                self.onCaptureStarted?(window)
                 self.isCapturing = true
             }
             
@@ -120,13 +193,25 @@ class WindowCaptureManager: NSObject {
     func stopCapture(for window: SCWindow) async {
         guard let stream = streams[window] else { return }
         
+        print("Stopping capture for window: \(window.title ?? "Unknown") - ID: \(window.windowID)")
+        
         do {
+            // Proper cleanup sequence based on research
             try await stream.stopCapture()
+            
+            // Remove stream output to prevent callbacks
+            if let output = streamOutputs[window] {
+                // SCStream automatically removes outputs when stopped, but we clean up our reference
+                print("Cleaning up stream output for window: \(window.title ?? "Unknown")")
+            }
             
             await MainActor.run {
                 self.streams.removeValue(forKey: window)
                 self.streamOutputs.removeValue(forKey: window)  // Remove the output reference
-                self.capturedWindows.removeAll { $0.window.windowID == window.windowID }
+                // Notify AppModel that capture has stopped
+                self.onCaptureStopped?(window.windowID)
+                
+                print("Stream cleanup complete. Remaining streams: \(self.streams.count)")
                 
                 if self.streams.isEmpty {
                     self.isCapturing = false
@@ -135,6 +220,17 @@ class WindowCaptureManager: NSObject {
             
         } catch {
             print("Failed to stop capture: \(error)")
+            // Still clean up references even on error
+            await MainActor.run {
+                self.streams.removeValue(forKey: window)
+                self.streamOutputs.removeValue(forKey: window)
+                // Notify AppModel that capture has stopped
+                self.onCaptureStopped?(window.windowID)
+                
+                if self.streams.isEmpty {
+                    self.isCapturing = false
+                }
+            }
         }
     }
     
@@ -145,49 +241,97 @@ class WindowCaptureManager: NSObject {
     }
     
     private func isWindowBeingCaptured(_ window: SCWindow) -> Bool {
-        return capturedWindows.contains { $0.window.windowID == window.windowID }
+        return streams.keys.contains { $0.windowID == window.windowID }
     }
     
     func updateTexture(for window: SCWindow, with sampleBuffer: CMSampleBuffer) {
-        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer),
-              let cache = textureCache else { 
-            print("Failed to get pixel buffer or texture cache")
-            return 
+        // Validate CMSampleBuffer first
+        guard CMSampleBufferIsValid(sampleBuffer) else {
+            print("❌ Invalid CMSampleBuffer for window: \(window.title ?? "Unknown")")
+            return
+        }
+        
+        // Check if buffer is ready
+        guard CMSampleBufferDataIsReady(sampleBuffer) else {
+            print("⚠️ CMSampleBuffer data not ready for window: \(window.title ?? "Unknown")")
+            return
+        }
+        
+        // Extract pixel buffer
+        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
+            print("⚠️ No pixel buffer in CMSampleBuffer for window: \(window.title ?? "Unknown")")
+            return
+        }
+        
+        // Get the backing IOSurface - Apple's recommended approach
+        guard let ioSurfaceRef = CVPixelBufferGetIOSurface(pixelBuffer) else {
+            print("❌ No IOSurface found in pixel buffer for window: \(window.title ?? "Unknown")")
+            return
+        }
+        // Use takeUnretainedValue() instead of unsafe bit casting
+        let surface = ioSurfaceRef.takeUnretainedValue() as IOSurface
+        
+        print("🎯 DEBUG: IOSurface extracted successfully for \(window.title ?? "Unknown"):")
+        print("   Surface dimensions: \(surface.width)x\(surface.height)")
+        print("   Surface pixel format: \(surface.pixelFormat)")
+        print("   Surface bytes per element: \(surface.bytesPerElement)")
+        print("   Surface bytes per row: \(surface.bytesPerRow)")
+        print("   Surface element width: \(surface.elementWidth)")
+        print("   Surface element height: \(surface.elementHeight)")
+        print("   Surface plane count: \(surface.planeCount)")
+        print("   Surface allocation size: \(surface.allocationSize)")
+        
+        // Handle ScreenCaptureKit attachments using proper enum values
+        var contentRect: CGRect = .zero
+        var contentScale: CGFloat = 1.0
+        var scaleFactor: CGFloat = 1.0
+        
+        if let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]],
+           let firstAttachment = attachments.first {
+            
+            // Validate the status of the frame
+            if let statusRawValue = firstAttachment[SCStreamFrameInfo.status] as? Int,
+               let status = SCFrameStatus(rawValue: statusRawValue),
+               status != .complete {
+                print("⚠️ Frame not complete for window: \(window.title ?? "Unknown"), status: \(status)")
+                return
+            }
+            
+            // Extract content rectangle using proper enum
+            if let contentRectDict = firstAttachment[.contentRect],
+               let rect = CGRect(dictionaryRepresentation: contentRectDict as! CFDictionary) {
+                contentRect = rect
+            }
+            
+            // Extract content scale and scale factor using proper enums
+            if let scale = firstAttachment[.contentScale] as? CGFloat {
+                contentScale = scale
+            }
+            
+            if let factor = firstAttachment[.scaleFactor] as? CGFloat {
+                scaleFactor = factor
+            }
         }
         
         let width = CVPixelBufferGetWidth(pixelBuffer)
         let height = CVPixelBufferGetHeight(pixelBuffer)
         
-        var cvTexture: CVMetalTexture?
-        let status = CVMetalTextureCacheCreateTextureFromImage(
-            nil,
-            cache,
-            pixelBuffer,
-            nil,
-            .bgra8Unorm,
-            width,
-            height,
-            0,
-            &cvTexture
-        )
+        // Log content information on first frame for debugging
+        let windowID = window.windowID
+        // Track if this is the first frame with an IOSurface for this window
+        let isFirstFrame = true  // We'll let AppModel track this now
         
-        guard status == kCVReturnSuccess,
-              let cvTexture = cvTexture,
-              let texture = CVMetalTextureGetTexture(cvTexture) else {
-            print("Failed to create Metal texture from pixel buffer (status: \(status))")
-            return
+        if isFirstFrame {
+            print("📊 First frame info for \(window.title ?? "Unknown"):")
+            print("   Pixel buffer size: \(width)x\(height)")
+            print("   Content rect: \(contentRect)")
+            print("   Content scale: \(contentScale)")
+            print("   Scale factor: \(scaleFactor)")
         }
         
-        print("Successfully created texture for window \(window.title ?? "Unknown") - size: \(width)x\(height)")
-        
+        // Notify AppModel with the new IOSurface
         Task { @MainActor in
-            if let index = self.capturedWindows.firstIndex(where: { $0.window.windowID == window.windowID }) {
-                self.capturedWindows[index].texture = texture
-                self.capturedWindows[index].lastUpdate = Date()
-                print("Updated texture for captured window: \(self.capturedWindows[index].title)")
-            } else {
-                print("Warning: Received texture update for non-captured window")
-            }
+            self.onFrameUpdated?(window.windowID, surface, contentRect, contentScale, scaleFactor)
         }
     }
 }
@@ -203,7 +347,8 @@ extension WindowCaptureManager: SCStreamDelegate {
             if let window = self.streams.first(where: { $0.value === stream })?.key {
                 self.streams.removeValue(forKey: window)
                 self.streamOutputs.removeValue(forKey: window)  // Remove the output reference
-                self.capturedWindows.removeAll { $0.window.windowID == window.windowID }
+                // Notify AppModel that capture has stopped
+                self.onCaptureStopped?(window.windowID)
             }
             
             if self.streams.isEmpty {
@@ -219,26 +364,86 @@ private class StreamOutput: NSObject, SCStreamOutput {
     weak var window: SCWindow?
     weak var captureManager: WindowCaptureManager?
     private var frameCount = 0
+    private var errorCount = 0
+    private var lastFrameTime = Date()
+    private var droppedFrameCount = 0
     
     init(window: SCWindow, captureManager: WindowCaptureManager) {
         self.window = window
         self.captureManager = captureManager
+        super.init()
+        print("🎥 StreamOutput initialized for window: \(window.title ?? "Unknown")")
     }
     
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
-        guard type == .screen,
-              let window = window,
-              let captureManager = captureManager else { 
-            print("StreamOutput: Skipping frame - type: \(type), window: \(window != nil), manager: \(captureManager != nil)")
-            return 
+        // Validate input parameters
+        guard type == .screen else {
+            if frameCount == 0 {  // Only log once
+                print("⚠️ StreamOutput: Ignoring non-screen output type: \(type)")
+            }
+            return
         }
         
-        // Log only periodically to avoid spam
+        guard let window = window else {
+            print("❌ StreamOutput: Window reference is nil")
+            return
+        }
+        
+        guard let captureManager = captureManager else {
+            print("❌ StreamOutput: CaptureManager reference is nil")
+            return
+        }
+        
+        // Track frame timing for performance monitoring
+        let currentTime = Date()
+        let timeSinceLastFrame = currentTime.timeIntervalSince(lastFrameTime)
+        lastFrameTime = currentTime
+        
         frameCount += 1
-        if frameCount % 60 == 0 {  // Log every 60 frames (once per second at 60fps)
-            print("StreamOutput: Received frame \(frameCount) for window: \(window.title ?? "Unknown")")
+        
+        // Detect dropped frames (gaps larger than expected frame interval)
+        let expectedInterval = 1.0 / 30.0  // 30 FPS
+        if timeSinceLastFrame > expectedInterval * 1.5 && frameCount > 1 {
+            droppedFrameCount += 1
+            if droppedFrameCount % 10 == 1 {  // Log every 10th dropped frame
+                print("⚠️ Possible dropped frame detected for \(window.title ?? "Unknown")")
+                print("   Time since last frame: \(String(format: "%.3f", timeSinceLastFrame))s")
+            }
         }
         
+        // Enhanced periodic logging with performance metrics
+        if frameCount % 60 == 0 {  // Log every 60 frames (every 2 seconds at 30fps)
+            let avgFrameTime = timeSinceLastFrame
+            let fps = 1.0 / avgFrameTime
+            
+            print("📊 StreamOutput stats for '\(window.title ?? "Unknown")':")
+            print("   Frames received: \(frameCount)")
+            print("   Current FPS: \(String(format: "%.1f", fps))")
+            print("   Dropped frames: \(droppedFrameCount)")
+            print("   Errors: \(errorCount)")
+        }
+        
+        // Validate sample buffer before processing
+        guard CMSampleBufferIsValid(sampleBuffer) else {
+            errorCount += 1
+            if errorCount % 10 == 1 {  // Log every 10th error
+                print("❌ StreamOutput: Invalid sample buffer for \(window.title ?? "Unknown") (error #\(errorCount))")
+            }
+            return
+        }
+        
+        // Pass to texture update (no try/catch needed as updateTexture doesn't throw)
         captureManager.updateTexture(for: window, with: sampleBuffer)
+    }
+    
+    // Add stream error handling
+    func stream(_ stream: SCStream, didStopWithError error: Error) {
+        print("❌ StreamOutput: Stream stopped with error for \(window?.title ?? "Unknown"): \(error)")
+        print("   Final stats - Frames: \(frameCount), Errors: \(errorCount), Dropped: \(droppedFrameCount)")
+    }
+    
+    deinit {
+        print("🗑️ StreamOutput deallocated for window: \(window?.title ?? "Unknown")")
+        print("   Final frame count: \(frameCount), errors: \(errorCount)")
     }
 }

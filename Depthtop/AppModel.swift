@@ -25,10 +25,13 @@ class AppModel {
     // Window capture management
     let windowCaptureManager = WindowCaptureManager()
     
-    // Captured windows that will be rendered in the immersive space
-    var capturedWindows: [CapturedWindow] {
-        windowCaptureManager.capturedWindows
+    init() {
+        setupWindowCaptureCallbacks()
     }
+    
+    // Captured windows that will be rendered in the immersive space
+    // Now owned by AppModel instead of referencing WindowCaptureManager
+    var capturedWindows: [CapturedWindow] = []
     
     // Layout configuration for windows in 3D space
     var windowArrangement: WindowArrangement = .grid
@@ -81,7 +84,9 @@ class AppModel {
     }
     
     func refreshWindows() async {
+        print("🔄 AppModel: Refreshing windows...")
         await windowCaptureManager.refreshAvailableWindows()
+        print("✅ AppModel: Window refresh complete")
     }
     
     func startCapture(for window: SCWindow) async {
@@ -116,13 +121,41 @@ class AppModel {
     }
     
     func getWindowRenderData() -> [WindowRenderData] {
-        return capturedWindows.compactMap { window in
-            guard let texture = window.texture else { return nil }
-            return WindowRenderData(
-                texture: texture,
-                textureGPUResourceID: texture.gpuResourceID,
-                modelMatrix: window.modelMatrix
-            )
+        // Note: This function is not used in the current implementation
+        // The renderer now creates textures from IOSurface directly
+        return []
+    }
+    
+    private func setupWindowCaptureCallbacks() {
+        // Set up callback to add a new window when capture starts
+        windowCaptureManager.onCaptureStarted = { [weak self] window in
+            guard let self = self else { return }
+            let newWindow = CapturedWindow(window: window, surface: nil, lastUpdate: Date())
+            self.capturedWindows.append(newWindow)
+            print("✅ AppModel: Added captured window: \(window.title ?? "Unknown")")
+        }
+        
+        // Set up callback to remove a window when capture stops
+        windowCaptureManager.onCaptureStopped = { [weak self] windowID in
+            self?.capturedWindows.removeAll { $0.window.windowID == windowID }
+            print("✅ AppModel: Removed captured window with ID: \(windowID)")
+        }
+        
+        // Set up callback to update a window with a new IOSurface
+        windowCaptureManager.onFrameUpdated = { [weak self] windowID, surface, contentRect, contentScale, scaleFactor in
+            guard let self = self else { return }
+            if let index = self.capturedWindows.firstIndex(where: { $0.window.windowID == windowID }) {
+                let isFirstSurface = self.capturedWindows[index].surface == nil
+                self.capturedWindows[index].surface = surface
+                self.capturedWindows[index].contentRect = contentRect
+                self.capturedWindows[index].contentScale = contentScale
+                self.capturedWindows[index].scaleFactor = scaleFactor
+                self.capturedWindows[index].lastUpdate = Date()
+                
+                if isFirstSurface {
+                    print("✅ AppModel: First IOSurface set for window: \(self.capturedWindows[index].title)")
+                }
+            }
         }
     }
 }

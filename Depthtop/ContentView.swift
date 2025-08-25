@@ -13,12 +13,13 @@ struct ContentView: View {
     @Environment(\.supportsRemoteScenes) private var supportsRemoteScenes
     @State private var selectedWindows: Set<CGWindowID> = []
     @State private var showPreview = true
+    @State private var showDebugCapture = false
     
     var body: some View {
         HSplitView {
             // Left side: Window list and controls
             NavigationStack {
-                VStack(spacing: 20) {
+                VStack(spacing: 16) {
                     // Header
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Depthtop")
@@ -32,13 +33,13 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal)
                     
-                    // Window list
+                    // Window list - use more of the available space
                     ScrollView {
-                        LazyVStack(spacing: 12) {
+                        LazyVStack(spacing: 8) {
                             ForEach(appModel.windowCaptureManager.availableWindows, id: \.windowID) { window in
                                 WindowRow(
                                     window: window,
-                                    isCapturing: appModel.windowCaptureManager.capturedWindows.contains { 
+                                    isCapturing: appModel.capturedWindows.contains { 
                                         $0.window.windowID == window.windowID 
                                     },
                                     onToggle: { isOn in
@@ -53,45 +54,70 @@ struct ContentView: View {
                                 )
                             }
                         }
-                        .padding(.horizontal)
+                        .padding(.horizontal, 12)
                     }
                     
                     // Controls
-                    VStack(spacing: 16) {
+                    VStack(spacing: 12) {
                         // Window arrangement picker
-                        Picker("Arrangement", selection: Binding(
-                            get: { appModel.windowArrangement },
-                            set: { 
-                                appModel.windowArrangement = $0
-                                appModel.updateWindowPositions()
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("3D Arrangement")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            
+                            Picker("Arrangement", selection: Binding(
+                                get: { appModel.windowArrangement },
+                                set: { 
+                                    appModel.windowArrangement = $0
+                                    appModel.updateWindowPositions()
+                                }
+                            )) {
+                                Text("Grid").tag(AppModel.WindowArrangement.grid)
+                                Text("Curved").tag(AppModel.WindowArrangement.curved)
+                                Text("Stack").tag(AppModel.WindowArrangement.stack)
                             }
-                        )) {
-                            Text("Grid").tag(AppModel.WindowArrangement.grid)
-                            Text("Curved").tag(AppModel.WindowArrangement.curved)
-                            Text("Stack").tag(AppModel.WindowArrangement.stack)
+                            .pickerStyle(SegmentedPickerStyle())
                         }
-                        .pickerStyle(SegmentedPickerStyle())
-                        .padding(.horizontal)
+                        .padding(.horizontal, 12)
                         
-                        // Status and immersive space toggle
-                        HStack {
+                        // Status and controls
+                        VStack(spacing: 8) {
+                            // Status
                             if appModel.windowCaptureManager.isCapturing {
-                                Label("\(appModel.capturedWindows.count) windows captured", 
-                                      systemImage: "dot.radiowaves.left.and.right")
-                                    .foregroundStyle(.green)
+                                HStack {
+                                    Label("\(appModel.capturedWindows.count) windows captured", 
+                                          systemImage: "dot.radiowaves.left.and.right")
+                                        .foregroundStyle(.green)
+                                        .font(.caption)
+                                    Spacer()
+                                }
                             }
                             
-                            Spacer()
-                            
-                            Button(action: { showPreview.toggle() }) {
-                                Label(showPreview ? "Hide Preview" : "Show Preview", 
-                                      systemImage: showPreview ? "eye.slash" : "eye")
+                            // Action buttons - arranged vertically for more space
+                            VStack(spacing: 6) {
+                                HStack(spacing: 8) {
+                                    Button(action: { showPreview.toggle() }) {
+                                        Label(showPreview ? "Hide 3D Preview" : "Show 3D Preview", 
+                                              systemImage: showPreview ? "eye.slash" : "eye")
+                                    }
+                                    .buttonStyle(.borderedProminent)
+                                    .controlSize(.small)
+                                    
+                                    #if DEBUG
+                                    Button(action: { showDebugCapture.toggle() }) {
+                                        Label(showDebugCapture ? "Hide Debug" : "Show Debug", 
+                                              systemImage: showDebugCapture ? "ladybug.slash" : "ladybug")
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.small)
+                                    .foregroundStyle(.orange)
+                                    #endif
+                                }
+                                
+                                ToggleImmersiveSpaceButton()
                             }
-                            .buttonStyle(.borderless)
-                            
-                            ToggleImmersiveSpaceButton()
                         }
-                        .padding(.horizontal)
+                        .padding(.horizontal, 12)
                         
                         // Vision Pro connection status
                         if !supportsRemoteScenes {
@@ -123,14 +149,49 @@ struct ContentView: View {
             }
             .frame(minWidth: 400)
             
-            // Right side: 3D Preview
-            if showPreview {
-                RealityKitPreviewView()
-                    .environment(appModel)
-                    .frame(minWidth: 400)
+            // Right side: Preview panels
+            if showPreview || showDebugCapture {
+                if showPreview && showDebugCapture {
+                    // Show both side by side
+                    HSplitView {
+                        RealityKitPreviewView()
+                            .environment(appModel)
+                            .frame(minWidth: 600, minHeight: 500)
+                        
+                        DebugCapturePreview()
+                            .environment(appModel)
+                            .frame(minWidth: 400)
+                    }
+                    .frame(minWidth: 1000, minHeight: 500)
+                } else if showPreview {
+                    // Show only 3D preview
+                    RealityKitPreviewView()
+                        .environment(appModel)
+                        .frame(minWidth: 800, minHeight: 600)
+                } else {
+                    // Show only debug capture
+                    DebugCapturePreview()
+                        .environment(appModel)
+                        .frame(minWidth: 400)
+                }
             }
         }
-        .frame(width: showPreview ? 1000 : 600, height: 600)
+        .frame(width: totalWidth, height: 600)
+    }
+    
+    private var totalWidth: CGFloat {
+        let hasRightPanel = showPreview || showDebugCapture
+        let rightPanelWidth: CGFloat
+        
+        if showPreview && showDebugCapture {
+            rightPanelWidth = 800  // Both panels side by side
+        } else if hasRightPanel {
+            rightPanelWidth = 400  // Single panel
+        } else {
+            rightPanelWidth = 0    // No right panel
+        }
+        
+        return 400 + rightPanelWidth  // Left panel (400) + right panel
     }
 }
 

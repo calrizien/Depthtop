@@ -10,13 +10,17 @@ import ScreenCaptureKit
 import Metal
 import simd
 import SwiftUI
+import IOSurface
 
 @MainActor
 @Observable
 class CapturedWindow: Identifiable {
     let id = UUID()
     let window: SCWindow
-    var texture: MTLTexture?
+    var surface: IOSurface?
+    var contentRect: CGRect = .zero
+    var contentScale: CGFloat = 1.0
+    var scaleFactor: CGFloat = 1.0
     var lastUpdate: Date
     var position: SIMD3<Float>
     var scale: Float
@@ -36,15 +40,15 @@ class CapturedWindow: Identifiable {
     }
     
     var textureSize: SIMD2<Int> {
-        if let texture = texture {
-            return SIMD2<Int>(Int(texture.width), Int(texture.height))
+        if let surface = surface {
+            return SIMD2<Int>(Int(surface.width), Int(surface.height))
         }
         return SIMD2<Int>(Int(window.frame.width * 2), Int(window.frame.height * 2))
     }
     
-    init(window: SCWindow, texture: MTLTexture? = nil, lastUpdate: Date = Date()) {
+    init(window: SCWindow, surface: IOSurface? = nil, lastUpdate: Date = Date()) {
         self.window = window
-        self.texture = texture
+        self.surface = surface
         self.lastUpdate = lastUpdate
         
         // Default position in 3D space (will be arranged later)
