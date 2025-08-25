@@ -8,7 +8,10 @@
       "Read(//Users/brandonwinston/Developer/Projects/VisionOS/Depthtop-archived_build/Depthtop/**)",
       "Read(//Users/brandonwinston/Developer/Testing/VisionPro/CapturingScreenContentInMacOS/**)",
       "mcp__playwright__browser_navigate",
-      "mcp__playwright__browser_type"
+      "mcp__playwright__browser_type",
+      "mcp__playwright__browser_wait_for",
+      "Bash(gemini:*)",
+      "mcp__playwright__browser_close"
     ],
     "deny": [],
     "ask": []

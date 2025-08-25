@@ -181,14 +181,39 @@ This approach is particularly useful when:
    - Provide clear visual feedback for window selection
    - Respect user's IPD settings
 
+## RemoteImmersiveSpace - Core Feature Documentation
+
+The RemoteImmersiveSpace is the centerpiece of Depthtop, enabling Mac-rendered content to appear as spatial windows in Vision Pro.
+
+📖 **See [REMOTE_IMMERSIVE_SPACE_IMPLEMENTATION.md](./REMOTE_IMMERSIVE_SPACE_IMPLEMENTATION.md) for complete technical documentation**
+
+### Quick Reference
+- Uses CompositorContent protocol with CompositorLayer for Metal rendering
+- Captures windows via ScreenCaptureKit and renders them as spatial panels
+- Thread-safe texture pipeline: Capture → IOSurface → MTLTexture → GPU
+- Positions windows in 3D space using Model-View-Projection matrices
+- Leverages ARKit for head tracking and spatial awareness
+
+### Current Implementation Status
+- Window capture and texture conversion: ✅ Working
+- RealityKit preview on Mac: ✅ Working  
+- CVMetalTextureCache optimization: ✅ Implemented
+- RemoteImmersiveSpace structure: ✅ Created
+- CompositorContent conformance: 🚧 In Progress
+- Metal window rendering pipeline: 🚧 Being enhanced
+- Vision Pro streaming: ⏳ Ready for testing
+- User interaction: ⏳ Planned
+
 ## Current Status
 
 - ✅ Project created from Spatial Rendering App template
 - ✅ RemoteImmersiveSpace and CompositorServices configured
 - ✅ Basic Metal shader pipeline established
-- ⏳ ScreenCaptureKit integration needed
-- ⏳ Window texture rendering implementation needed
-- ⏳ Multi-window management system needed
+- ✅ ScreenCaptureKit integration completed
+- ✅ Window texture conversion working (proven in RealityKit preview)
+- 🚧 Window rendering in Metal render loop
+- 🚧 Thread-safe texture data passing
+- ⏳ Multi-window spatial management system
 - ⏳ 3D enhancement experiments pending
 
 ## Testing Approach
