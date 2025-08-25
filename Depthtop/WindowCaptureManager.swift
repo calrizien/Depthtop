@@ -49,15 +49,21 @@ class WindowCaptureManager: NSObject {
                 &cache
             )
             
-            if result == kCVReturnSuccess {
+            if result == kCVReturnSuccess, let cache = cache {
                 self.textureCache = cache
                 print("✅ Created CVMetalTextureCache for efficient texture conversion")
+                print("   Metal device: \(device.name)")
             } else {
                 print("❌ Failed to create CVMetalTextureCache: \(result)")
+                print("   Error code: \(result) (kCVReturnSuccess = \(kCVReturnSuccess))")
             }
+        } else {
+            print("❌ Failed to get Metal device")
         }
         
         print("🔧 Initializing WindowCaptureManager with Metal support")
+        print("   Metal device available: \(metalDevice != nil)")
+        print("   Texture cache available: \(textureCache != nil)")
     }
     
     func refreshAvailableWindows() async {
@@ -272,6 +278,11 @@ class WindowCaptureManager: NSObject {
     }
     
     func updateTexture(for window: SCWindow, with sampleBuffer: CMSampleBuffer) {
+        // Flush texture cache at the beginning of each frame update
+        if let cache = textureCache {
+            CVMetalTextureCacheFlush(cache, 0)
+        }
+        
         // Validate CMSampleBuffer first
         guard CMSampleBufferIsValid(sampleBuffer) else {
             print("❌ Invalid CMSampleBuffer for window: \(window.title ?? "Unknown")")
@@ -290,15 +301,33 @@ class WindowCaptureManager: NSObject {
             return
         }
         
+        // Verify pixel buffer format
+        let pixelFormat = CVPixelBufferGetPixelFormatType(pixelBuffer)
+        if pixelFormat != kCVPixelFormatType_32BGRA {
+            print("⚠️ Unexpected pixel format: \(pixelFormat) (expected \(kCVPixelFormatType_32BGRA))")
+            let fourCC = String(format: "%c%c%c%c",
+                               UInt8((pixelFormat >> 24) & 0xFF),
+                               UInt8((pixelFormat >> 16) & 0xFF),
+                               UInt8((pixelFormat >> 8) & 0xFF),
+                               UInt8(pixelFormat & 0xFF))
+            print("   Format FourCC: \(fourCC)")
+        }
+        
         // Check we have texture cache
         guard let textureCache = textureCache else {
-            print("❌ No texture cache available")
+            print("❌ No texture cache available - Metal device init failed")
             return
         }
         
         // Get dimensions
         let width = CVPixelBufferGetWidth(pixelBuffer)
         let height = CVPixelBufferGetHeight(pixelBuffer)
+        
+        // Validate dimensions
+        guard width > 0, height > 0 else {
+            print("❌ Invalid pixel buffer dimensions: \(width)x\(height)")
+            return
+        }
         
         // Create Metal texture from pixel buffer using CVMetalTextureCache
         var cvMetalTexture: CVMetalTexture?
@@ -314,10 +343,33 @@ class WindowCaptureManager: NSObject {
             &cvMetalTexture
         )
         
-        guard status == kCVReturnSuccess,
-              let cvTexture = cvMetalTexture,
-              let metalTexture = CVMetalTextureGetTexture(cvTexture) else {
-            print("❌ Failed to create Metal texture from pixel buffer: \(status)")
+        // Check status and provide detailed error info
+        guard status == kCVReturnSuccess else {
+            print("❌ CVMetalTextureCacheCreateTextureFromImage failed with status: \(status)")
+            switch status {
+            case kCVReturnInvalidArgument:
+                print("   Error: Invalid argument")
+            case kCVReturnAllocationFailed:
+                print("   Error: Allocation failed")
+            case kCVReturnInvalidPixelFormat:
+                print("   Error: Invalid pixel format")
+            case kCVReturnInvalidPixelBufferAttributes:
+                print("   Error: Invalid pixel buffer attributes")
+            case kCVReturnPixelBufferNotMetalCompatible:
+                print("   Error: Pixel buffer not Metal compatible")
+            default:
+                print("   Error: Unknown error code \(status)")
+            }
+            return
+        }
+        
+        guard let cvTexture = cvMetalTexture else {
+            print("❌ CVMetalTexture is nil despite success status")
+            return
+        }
+        
+        guard let metalTexture = CVMetalTextureGetTexture(cvTexture) else {
+            print("❌ Failed to get MTLTexture from CVMetalTexture")
             return
         }
         
@@ -384,8 +436,12 @@ class WindowCaptureManager: NSObject {
         }
         
         // Notify AppModel with the new Metal texture
+        // IMPORTANT: Keep cvTexture alive by passing it along or storing it temporarily
+        // The texture will be valid as long as cvTexture is retained
         Task { @MainActor in
+            // Pass the texture - cvTexture will be kept alive by ARC until this task completes
             self.onFrameUpdated?(window.windowID, metalTexture, contentRect, contentScale, scaleFactor)
+            // cvTexture goes out of scope here and is released after the callback
         }
     }
 }

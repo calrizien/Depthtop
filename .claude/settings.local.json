@@ -6,7 +6,9 @@
       "mcp__apple-doc-mcp__get_documentation",
       "WebSearch",
       "Read(//Users/brandonwinston/Developer/Projects/VisionOS/Depthtop-archived_build/Depthtop/**)",
-      "Read(//Users/brandonwinston/Developer/Testing/VisionPro/CapturingScreenContentInMacOS/**)"
+      "Read(//Users/brandonwinston/Developer/Testing/VisionPro/CapturingScreenContentInMacOS/**)",
+      "mcp__playwright__browser_navigate",
+      "mcp__playwright__browser_type"
     ],
     "deny": [],
     "ask": []
