@@ -712,15 +712,9 @@ actor Renderer {
                 print("Fetching window data: \(capturedWindows.count) captured windows")
                 
                 let data = capturedWindows.compactMap { window -> WindowRenderData? in
-                    guard let surface = window.surface else { 
-                        print("Window '\(window.title)' has no surface yet")
+                    guard let texture = window.texture else { 
+                        print("Window '\(window.title)' has no texture yet")
                         return nil 
-                    }
-                    
-                    // Create MTLTexture from IOSurface
-                    guard let texture = createTextureFromSurface(surface, device: device) else {
-                        print("Window '\(window.title)' failed to create texture from surface")
-                        return nil
                     }
                     
                     // Get GPU resource ID (this should be valid if texture exists)

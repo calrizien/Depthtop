@@ -130,7 +130,7 @@ class AppModel {
         // Set up callback to add a new window when capture starts
         windowCaptureManager.onCaptureStarted = { [weak self] window in
             guard let self = self else { return }
-            let newWindow = CapturedWindow(window: window, surface: nil, lastUpdate: Date())
+            let newWindow = CapturedWindow(window: window, texture: nil, lastUpdate: Date())
             self.capturedWindows.append(newWindow)
             print("✅ AppModel: Added captured window: \(window.title ?? "Unknown")")
         }
@@ -141,19 +141,19 @@ class AppModel {
             print("✅ AppModel: Removed captured window with ID: \(windowID)")
         }
         
-        // Set up callback to update a window with a new IOSurface
-        windowCaptureManager.onFrameUpdated = { [weak self] windowID, surface, contentRect, contentScale, scaleFactor in
+        // Set up callback to update a window with a new Metal texture
+        windowCaptureManager.onFrameUpdated = { [weak self] windowID, texture, contentRect, contentScale, scaleFactor in
             guard let self = self else { return }
             if let index = self.capturedWindows.firstIndex(where: { $0.window.windowID == windowID }) {
-                let isFirstSurface = self.capturedWindows[index].surface == nil
-                self.capturedWindows[index].surface = surface
+                let isFirstTexture = self.capturedWindows[index].texture == nil
+                self.capturedWindows[index].texture = texture
                 self.capturedWindows[index].contentRect = contentRect
                 self.capturedWindows[index].contentScale = contentScale
                 self.capturedWindows[index].scaleFactor = scaleFactor
                 self.capturedWindows[index].lastUpdate = Date()
                 
-                if isFirstSurface {
-                    print("✅ AppModel: First IOSurface set for window: \(self.capturedWindows[index].title)")
+                if isFirstTexture {
+                    print("✅ AppModel: First texture set for window: \(self.capturedWindows[index].title)")
                 }
             }
         }

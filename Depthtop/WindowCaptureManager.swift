@@ -19,18 +19,45 @@ class WindowCaptureManager: NSObject {
     // Removed capturedWindows - now managed by AppModel
     var isCapturing = false
     
-    // Callbacks for AppModel to receive updates
+    // Callbacks for AppModel to receive updates  
     var onCaptureStarted: ((SCWindow) -> Void)?
     var onCaptureStopped: ((CGWindowID) -> Void)?
-    var onFrameUpdated: ((CGWindowID, IOSurface, CGRect, CGFloat, CGFloat) -> Void)?
+    var onFrameUpdated: ((CGWindowID, MTLTexture, CGRect, CGFloat, CGFloat) -> Void)?  // Changed to pass MTLTexture
     
     private var streams: [SCWindow: SCStream] = [:]
     private var streamOutputs: [SCWindow: StreamOutput] = [:]  // Keep strong reference to outputs
     private let queue = DispatchQueue(label: "WindowCaptureManager.queue")
     
+    // Metal properties for efficient texture conversion
+    private let metalDevice: MTLDevice?
+    private var textureCache: CVMetalTextureCache?
+    
     override init() {
+        // Initialize Metal device
+        self.metalDevice = MTLCreateSystemDefaultDevice()
+        
         super.init()
-        print("🔧 Initializing WindowCaptureManager for IOSurface-based capture")
+        
+        // Create CVMetalTextureCache for efficient texture conversion
+        if let device = metalDevice {
+            var cache: CVMetalTextureCache?
+            let result = CVMetalTextureCacheCreate(
+                kCFAllocatorDefault,
+                nil, // cache attributes
+                device,
+                nil, // texture attributes
+                &cache
+            )
+            
+            if result == kCVReturnSuccess {
+                self.textureCache = cache
+                print("✅ Created CVMetalTextureCache for efficient texture conversion")
+            } else {
+                print("❌ Failed to create CVMetalTextureCache: \(result)")
+            }
+        }
+        
+        print("🔧 Initializing WindowCaptureManager with Metal support")
     }
     
     func refreshAvailableWindows() async {
@@ -263,12 +290,42 @@ class WindowCaptureManager: NSObject {
             return
         }
         
-        // Get the backing IOSurface - Apple's recommended approach
+        // Check we have texture cache
+        guard let textureCache = textureCache else {
+            print("❌ No texture cache available")
+            return
+        }
+        
+        // Get dimensions
+        let width = CVPixelBufferGetWidth(pixelBuffer)
+        let height = CVPixelBufferGetHeight(pixelBuffer)
+        
+        // Create Metal texture from pixel buffer using CVMetalTextureCache
+        var cvMetalTexture: CVMetalTexture?
+        let status = CVMetalTextureCacheCreateTextureFromImage(
+            kCFAllocatorDefault,
+            textureCache,
+            pixelBuffer,
+            nil, // texture attributes
+            .bgra8Unorm, // pixel format
+            width,
+            height,
+            0, // plane index
+            &cvMetalTexture
+        )
+        
+        guard status == kCVReturnSuccess,
+              let cvTexture = cvMetalTexture,
+              let metalTexture = CVMetalTextureGetTexture(cvTexture) else {
+            print("❌ Failed to create Metal texture from pixel buffer: \(status)")
+            return
+        }
+        
+        // Get the backing IOSurface for additional info
         guard let ioSurfaceRef = CVPixelBufferGetIOSurface(pixelBuffer) else {
             print("❌ No IOSurface found in pixel buffer for window: \(window.title ?? "Unknown")")
             return
         }
-        // Use takeUnretainedValue() instead of unsafe bit casting
         let surface = ioSurfaceRef.takeUnretainedValue() as IOSurface
         
         print("🎯 DEBUG: IOSurface extracted successfully for \(window.title ?? "Unknown"):")
@@ -313,9 +370,6 @@ class WindowCaptureManager: NSObject {
             }
         }
         
-        let width = CVPixelBufferGetWidth(pixelBuffer)
-        let height = CVPixelBufferGetHeight(pixelBuffer)
-        
         // Log content information on first frame for debugging
         let windowID = window.windowID
         // Track if this is the first frame with an IOSurface for this window
@@ -323,15 +377,15 @@ class WindowCaptureManager: NSObject {
         
         if isFirstFrame {
             print("📊 First frame info for \(window.title ?? "Unknown"):")
-            print("   Pixel buffer size: \(width)x\(height)")
+            print("   Pixel buffer size: \(metalTexture.width)x\(metalTexture.height)")
             print("   Content rect: \(contentRect)")
             print("   Content scale: \(contentScale)")
             print("   Scale factor: \(scaleFactor)")
         }
         
-        // Notify AppModel with the new IOSurface
+        // Notify AppModel with the new Metal texture
         Task { @MainActor in
-            self.onFrameUpdated?(window.windowID, surface, contentRect, contentScale, scaleFactor)
+            self.onFrameUpdated?(window.windowID, metalTexture, contentRect, contentScale, scaleFactor)
         }
     }
 }

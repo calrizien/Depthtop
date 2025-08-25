@@ -92,8 +92,8 @@ struct DebugWindowPreview: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         
-                        if let surface = capturedWindow.surface {
-                            Text("Surface: \(surface.width)×\(surface.height)")
+                        if let texture = capturedWindow.texture {
+                            Text("Texture: \(texture.width)×\(texture.height)")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -108,7 +108,7 @@ struct DebugWindowPreview: View {
                 
                 // Status indicator
                 Circle()
-                    .fill(capturedWindow.surface != nil ? Color.green : Color.red)
+                    .fill(capturedWindow.texture != nil ? Color.green : Color.red)
                     .frame(width: 8, height: 8)
             }
             .padding()
@@ -128,8 +128,8 @@ struct DebugWindowPreview: View {
                             RoundedRectangle(cornerRadius: 8)
                                 .stroke(Color.blue.opacity(0.3), lineWidth: 1)
                         )
-                } else if capturedWindow.surface != nil {
-                    // Has surface but no image yet
+                } else if capturedWindow.texture != nil {
+                    // Has texture but no image yet
                     RoundedRectangle(cornerRadius: 8)
                         .fill(Color.orange.opacity(0.3))
                         .frame(height: 200)
@@ -137,13 +137,13 @@ struct DebugWindowPreview: View {
                             VStack {
                                 ProgressView()
                                     .scaleEffect(0.8)
-                                Text("Converting surface to image...")
+                                Text("Converting texture to image...")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
                         )
                 } else {
-                    // No surface available
+                    // No texture available
                     RoundedRectangle(cornerRadius: 8)
                         .fill(Color.red.opacity(0.3))
                         .frame(height: 200)
@@ -169,7 +169,7 @@ struct DebugWindowPreview: View {
     }
     
     private func updateImageFromSurface() {
-        guard let surface = capturedWindow.surface,
+        guard let texture = capturedWindow.texture,
               capturedWindow.lastUpdate > lastSurfaceUpdate else {
             return
         }
@@ -177,21 +177,26 @@ struct DebugWindowPreview: View {
         lastSurfaceUpdate = capturedWindow.lastUpdate
         
         Task { @MainActor in
-            if let nsImage = await createNSImageFromSurface(surface) {
+            if let nsImage = await createNSImageFromTexture(texture) {
                 self.displayImage = nsImage
                 print("✅ DEBUG: Updated preview image for \(capturedWindow.title): \(nsImage.size)")
             } else {
-                print("❌ DEBUG: Failed to create NSImage from surface for \(capturedWindow.title)")
+                print("❌ DEBUG: Failed to create NSImage from texture for \(capturedWindow.title)")
             }
         }
     }
     
     @MainActor
-    private func createNSImageFromSurface(_ surface: IOSurface) async -> NSImage? {
-        print("🖼️ DEBUG: Creating NSImage from IOSurface: \(surface.width)×\(surface.height)")
+    private func createNSImageFromTexture(_ texture: MTLTexture) async -> NSImage? {
+        print("🖼️ DEBUG: Creating NSImage from Metal texture: \(texture.width)×\(texture.height)")
         
-        // Create CIImage from IOSurface
-        let ciImage = CIImage(ioSurface: surface)
+        // Create CIImage from Metal texture
+        guard let ciImage = CIImage(mtlTexture: texture, options: [
+            .colorSpace: CGColorSpace(name: CGColorSpace.sRGB) as Any
+        ]) else {
+            print("❌ DEBUG: Failed to create CIImage from Metal texture")
+            return nil
+        }
         
         // Create CIContext for rendering
         guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) else {
@@ -206,7 +211,7 @@ struct DebugWindowPreview: View {
         ])
         
         // Render to CGImage
-        let renderRect = CGRect(x: 0, y: 0, width: surface.width, height: surface.height)
+        let renderRect = CGRect(x: 0, y: 0, width: texture.width, height: texture.height)
         guard let cgImage = ciContext.createCGImage(ciImage, from: renderRect) else {
             print("❌ DEBUG: Failed to create CGImage from CIImage")
             return nil

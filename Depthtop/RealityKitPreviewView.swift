@@ -457,10 +457,10 @@ struct RealityKitPreviewView: View {
             for (index, window) in appModel.capturedWindows.enumerated() {
                 print("  Window \(index): \(window.title)")
                 print("    ID: \(window.window.windowID)")
-                print("    Has surface: \(window.surface != nil)")
-                if let surface = window.surface {
-                    print("    Surface size: \(surface.width)x\(surface.height)")
-                    print("    Surface format: \(surface.pixelFormat)")
+                print("    Has texture: \(window.texture != nil)")
+                if let texture = window.texture {
+                    print("    Texture size: \(texture.width)x\(texture.height)")
+                    print("    Texture format: \(texture.pixelFormat)")
                 }
                 print("    Last update: \(window.lastUpdate)")
             }
@@ -510,7 +510,7 @@ struct RealityKitPreviewView: View {
                 print("  Children in root: \(rootEntity.children.count)")
                 
                 // Update texture asynchronously if available
-                if capturedWindow.surface != nil {
+                if capturedWindow.texture != nil {
                     print("🎨 Surface available, starting texture update task...")
                     Task { @MainActor in
                         print("🎨 Inside Task, calling updateEntityTextureFromCapture...")
@@ -549,8 +549,8 @@ struct RealityKitPreviewView: View {
         // Only update texture, not position
         Task { @MainActor in
             if let modelEntity = entity as? ModelEntity,
-               let surface = window.surface,
-               let material = await createMaterial(from: surface) {
+               let texture = window.texture,
+               let material = await createMaterial(from: texture) {
                 
                 print("🎯 Throttled texture update for window: \(window.title)")
                 
@@ -635,9 +635,9 @@ struct RealityKitPreviewView: View {
         
         // Create material
         let material: SimpleMaterial
-        if let surface = window.surface {
-            // Convert IOSurface to material
-            material = await createMaterial(from: surface) ?? {
+        if let metalTexture = window.texture {
+            // Convert Metal texture to material
+            material = await createMaterial(from: metalTexture) ?? {
                 // Fallback bright material if conversion fails
                 let m = SimpleMaterial(color: .init(red: 1.0, green: 0.2, blue: 0.2, alpha: 1.0), roughness: 0.3, isMetallic: false)
                 print("⚠️ Using fallback red material for window: \(window.title)")
@@ -764,18 +764,18 @@ struct RealityKitPreviewView: View {
             return
         }
         
-        guard let surface = window.surface else {
-            print("❌ Window has no IOSurface")
+        guard let metalTexture = window.texture else {
+            print("❌ Window has no Metal texture")
             print("   Window ID: \(window.window.windowID)")
             print("   Last update: \(window.lastUpdate)")
             return
         }
         
         print("✅ Prerequisites met - proceeding with material creation")
-        print("   Surface: \(surface.width)x\(surface.height)")
+        print("   Texture: \(metalTexture.width)x\(metalTexture.height)")
         
-        // Create material from IOSurface
-        if let material = await createMaterial(from: surface) {
+        // Create material from Metal texture
+        if let material = await createMaterial(from: metalTexture) {
             print("🎯 Applying material to ModelEntity...")
             
             // Recreate ModelComponent instead of just updating materials array
@@ -797,114 +797,41 @@ struct RealityKitPreviewView: View {
     }
     
     @MainActor
-    private func createMaterial(from surface: IOSurface) async -> SimpleMaterial? {
-        print("\n🎨 === CREATING MATERIAL FROM IOSURFACE ===")
-        print("🎯 Surface: \(surface.width)x\(surface.height), format: \(surface.pixelFormat)")
+    private func createMaterial(from metalTexture: MTLTexture) async -> SimpleMaterial? {
+        print("\n🎨 === CREATING MATERIAL FROM METAL TEXTURE ===")
+        print("🎯 Texture: \(metalTexture.width)x\(metalTexture.height), format: \(metalTexture.pixelFormat)")
         
-        // Validate surface properties
-        guard surface.width > 0 && surface.height > 0 && surface.allocationSize > 0 else {
-            print("❌ Invalid surface dimensions or no data")
+        // Validate texture properties
+        guard metalTexture.width > 0 && metalTexture.height > 0 else {
+            print("❌ Invalid texture dimensions")
             return SimpleMaterial(color: .init(red: 1.0, green: 0.0, blue: 0.0, alpha: 1.0), roughness: 0.3, isMetallic: false)
         }
         
-        // Try Metal texture approach first (more direct for RealityKit)
-        if let metalMaterial = await createMaterialFromMetal(surface: surface) {
-            print("✅ Created material using Metal texture approach")
-            return metalMaterial
-        }
-        
-        print("⚠️ Metal approach failed, trying CGImage approach...")
-        return await createMaterialSynchronously(from: surface)
+        // Convert Metal texture to CGImage then to TextureResource
+        // This is the recommended approach per Perplexity research
+        return await createTextureResourceFromMetal(metalTexture: metalTexture)
     }
     
-    @MainActor 
-    private func createMaterialFromMetal(surface: IOSurface) async -> SimpleMaterial? {
-        print("🔧 Creating material directly from IOSurface using simplified approach...")
+    @MainActor
+    private func createTextureResourceFromMetal(metalTexture: MTLTexture) async -> SimpleMaterial? {
+        print("🔧 Converting Metal texture to TextureResource...")
         
-        // Get default Metal device
-        guard let device = MTLCreateSystemDefaultDevice() else {
-            print("❌ No Metal device available")
-            return SimpleMaterial(color: .init(red: 1.0, green: 0.0, blue: 0.0, alpha: 1.0), roughness: 0.3, isMetallic: false)
-        }
-        
-        // Create Metal texture directly from IOSurface - this is the most efficient path
-        let descriptor = MTLTextureDescriptor()
-        descriptor.pixelFormat = .bgra8Unorm
-        descriptor.width = surface.width
-        descriptor.height = surface.height
-        descriptor.usage = [.shaderRead]
-        descriptor.storageMode = .shared
-        
-        guard let metalTexture = device.makeTexture(descriptor: descriptor, iosurface: surface, plane: 0) else {
-            print("❌ Failed to create Metal texture from IOSurface")
-            return SimpleMaterial(color: .init(red: 1.0, green: 0.5, blue: 0.0, alpha: 1.0), roughness: 0.3, isMetallic: false)
-        }
-        
-        print("✅ Created Metal texture: \(metalTexture.width)x\(metalTexture.height)")
-        
-        // Try the simplified approach: create CGImage synchronously without Task.detached
+        // Create CIImage from Metal texture
         guard let ciImage = CIImage(mtlTexture: metalTexture, options: [
             .colorSpace: CGColorSpace(name: CGColorSpace.sRGB) as Any
         ]) else {
             print("❌ Failed to create CIImage from Metal texture")
-            return SimpleMaterial(color: .init(red: 0.8, green: 0.4, blue: 0.0, alpha: 1.0), roughness: 0.3, isMetallic: false)
+            return SimpleMaterial(color: .init(red: 1.0, green: 0.5, blue: 0.0, alpha: 1.0), roughness: 0.3, isMetallic: false)
         }
         
-        let ciContext = CIContext(mtlDevice: device)
-        let renderRect = CGRect(x: 0, y: 0, width: surface.width, height: surface.height)
-        
-        guard let cgImage = ciContext.createCGImage(ciImage, from: renderRect) else {
-            print("❌ Failed to create CGImage from CIImage")
-            return SimpleMaterial(color: .init(red: 0.6, green: 0.3, blue: 0.0, alpha: 1.0), roughness: 0.3, isMetallic: false)
-        }
-        
-        print("✅ Created CGImage: \(cgImage.width)x\(cgImage.height)")
-        
-        // Create TextureResource synchronously without Task.detached to avoid deadlock
-        do {
-            let options = TextureResource.CreateOptions(semantic: .color)
-            
-            // Use the synchronous version and timeout the whole operation if needed
-            let textureResource: TextureResource
-            
-            // Create texture resource on the calling queue without detaching
-            textureResource = try await TextureResource(image: cgImage, options: options)
-            
-            print("✅ Created TextureResource synchronously")
-            
-            var material = SimpleMaterial()
-            material.color = .init(texture: .init(textureResource))
-            material.roughness = 0.1
-            material.metallic = 0.0
-            
-            return material
-            
-        } catch {
-            print("❌ TextureResource creation failed: \(error)")
-            // Return yellow material to indicate TextureResource creation failure
-            return SimpleMaterial(color: .init(red: 1.0, green: 1.0, blue: 0.0, alpha: 1.0), roughness: 0.3, isMetallic: false)
-        }
-    }
-    
-    @MainActor
-    private func createMaterialSynchronously(from surface: IOSurface) async -> SimpleMaterial? {
-        print("🖼️ Trying synchronous CGImage approach...")
-        
-        // Create CGImage from IOSurface directly
-        guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) else {
-            print("❌ Failed to create sRGB color space")
-            return SimpleMaterial(color: .init(red: 1.0, green: 0.5, blue: 0.5, alpha: 1.0), roughness: 0.3, isMetallic: false)
-        }
-        
-        let ciImage = CIImage(ioSurface: surface)
+        // Create CIContext (reuse if possible for performance)
         let ciContext = CIContext(options: [
-            .workingColorSpace: colorSpace,
-            .outputColorSpace: colorSpace,
             .useSoftwareRenderer: false
         ])
         
-        let renderRect = CGRect(x: 0, y: 0, width: surface.width, height: surface.height)
+        let renderRect = CGRect(x: 0, y: 0, width: metalTexture.width, height: metalTexture.height)
         
+        // Create CGImage from CIImage
         guard let cgImage = ciContext.createCGImage(ciImage, from: renderRect) else {
             print("❌ Failed to create CGImage from CIImage")
             return SimpleMaterial(color: .init(red: 0.5, green: 1.0, blue: 0.5, alpha: 1.0), roughness: 0.3, isMetallic: false)
@@ -912,25 +839,22 @@ struct RealityKitPreviewView: View {
         
         print("✅ Created CGImage: \(cgImage.width)x\(cgImage.height)")
         
-        // Create TextureResource directly without Task.detached
+        // Create TextureResource from CGImage
         do {
             let options = TextureResource.CreateOptions(semantic: .color)
-            
-            // Use TextureResource initializer with await
             let textureResource = try await TextureResource(image: cgImage, options: options)
             
-            print("✅ Created TextureResource synchronously")
+            print("✅ Created TextureResource successfully")
             
             var material = SimpleMaterial()
-            material.color = .init(texture: .init(textureResource))
-            material.roughness = 0.1
-            material.metallic = 0.0
+            material.color = SimpleMaterial.BaseColor(texture: MaterialParameters.Texture(textureResource))
+            material.roughness = 0.3
             
+            print("✅ Created SimpleMaterial with texture")
             return material
             
         } catch {
             print("❌ TextureResource creation failed: \(error)")
-            // Return bright purple to indicate synchronous path failure
             return SimpleMaterial(color: .init(red: 0.8, green: 0.2, blue: 0.8, alpha: 1.0), roughness: 0.3, isMetallic: false)
         }
     }

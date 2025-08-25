@@ -17,7 +17,7 @@ import IOSurface
 class CapturedWindow: Identifiable {
     let id = UUID()
     let window: SCWindow
-    var surface: IOSurface?
+    var texture: MTLTexture?  // Changed from IOSurface to MTLTexture for direct RealityKit use
     var contentRect: CGRect = .zero
     var contentScale: CGFloat = 1.0
     var scaleFactor: CGFloat = 1.0
@@ -40,15 +40,15 @@ class CapturedWindow: Identifiable {
     }
     
     var textureSize: SIMD2<Int> {
-        if let surface = surface {
-            return SIMD2<Int>(Int(surface.width), Int(surface.height))
+        if let texture = texture {
+            return SIMD2<Int>(Int(texture.width), Int(texture.height))
         }
         return SIMD2<Int>(Int(window.frame.width * 2), Int(window.frame.height * 2))
     }
     
-    init(window: SCWindow, surface: IOSurface? = nil, lastUpdate: Date = Date()) {
+    init(window: SCWindow, texture: MTLTexture? = nil, lastUpdate: Date = Date()) {
         self.window = window
-        self.surface = surface
+        self.texture = texture
         self.lastUpdate = lastUpdate
         
         // Default position in 3D space (will be arranged later)
