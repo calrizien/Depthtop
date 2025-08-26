@@ -53,6 +53,8 @@ extension ImmersiveSpaceContent: CompositorLayerConfiguration {
 
         configuration.layout = supportedLayouts.contains(.layered) ? .layered : .dedicated
 
+        // Note: CompositorServices requires Metal 4 APIs internally, even when set to false
+        // We've minimized our direct Metal 4 usage but can't fully downgrade
         configuration.supportsMTL4 = true
     }
 }

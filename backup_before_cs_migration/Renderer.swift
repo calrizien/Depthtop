@@ -70,8 +70,7 @@ final class RendererTaskExecutor: TaskExecutor {
 actor Renderer {
 
     let device: MTLDevice
-    let commandQueue: MTL4CommandQueue
-    // Remove persistent commandBuffer - create per-frame instead
+    let commandQueue: any MTL4CommandQueue
     let commandAllocators: [MTL4CommandAllocator]
     let vertexArgumentTable: MTL4ArgumentTable
     let fragmentArgumentTable: MTL4ArgumentTable
@@ -122,7 +121,6 @@ actor Renderer {
 
         let device = self.device
         self.commandQueue = layerRenderer.commandQueue
-        // Remove persistent commandBuffer - create per-frame instead
         self.commandAllocators = (0...maxBuffersInFlight).map { _ in device.makeCommandAllocator()! }
 
         let argTableDesc = MTL4ArgumentTableDescriptor()
@@ -473,6 +471,7 @@ actor Renderer {
 
         drawableTarget.updateViewProjectionArray(drawable: drawable)
 
+        // Even with MTL4 disabled, CompositorServices still uses MTL4 types internally
         let renderPassDescriptor = MTL4RenderPassDescriptor()
 
         if device.supportsMSAA {
@@ -522,7 +521,7 @@ actor Renderer {
 
         let commandAllocator = self.commandAllocators[uniformBufferIndex]
         
-        // Create command buffer per-frame to avoid memory leak
+        // Create command buffer per-frame with Metal 4 allocator
         guard let commandBuffer = device.makeCommandBuffer() else {
             print("Failed to create command buffer")
             return
@@ -546,9 +545,9 @@ actor Renderer {
 
         renderEncoder.pushDebugGroup("Draw Box")
 
-        renderEncoder.setCullMode(.back)
+        renderEncoder.setCullMode(MTLCullMode.back)
 
-        renderEncoder.setFrontFacing(.counterClockwise)
+        renderEncoder.setFrontFacing(MTLWinding.counterClockwise)
 
         // Will be set per object type below
         // renderEncoder.setRenderPipelineState(pipelineState)
@@ -571,7 +570,6 @@ actor Renderer {
         renderEncoder.setArgumentTable(self.fragmentArgumentTable, stages: .fragment)
 
         self.vertexArgumentTable.setAddress(dynamicUniformBuffer.gpuAddress + UInt64(uniformBufferOffset), index: BufferIndex.uniforms.rawValue)
-
         self.vertexArgumentTable.setAddress(drawableTarget.viewProjectionBuffer.gpuAddress + UInt64(drawableTarget.viewProjectionBufferOffset), index: BufferIndex.viewProjection.rawValue)
 
         for (index, element) in mesh.vertexDescriptor.layouts.enumerated() {
@@ -592,7 +590,7 @@ actor Renderer {
             // Use window pipeline for rendering windows
             renderEncoder.setRenderPipelineState(windowPipelineState)
             
-            // Update vertex buffers for quad once
+            // Update vertex buffers for quad with argument tables
             for (index, element) in quadMesh.vertexDescriptor.layouts.enumerated() {
                 guard let layout = element as? MDLVertexBufferLayout else {
                     fatalError("unsupported layout")
@@ -611,10 +609,10 @@ actor Renderer {
                 // Update uniforms with window's transform
                 uniforms[0].modelMatrix = windowData.modelMatrix
                 
-                // Set window texture - use the actual captured texture
+                // Set window texture using argument table with GPU resource ID
                 self.fragmentArgumentTable.setTexture(windowData.textureGPUResourceID, index: TextureIndex.color.rawValue)
                 
-                // Draw quad
+                // Draw quad with MTL4 API using GPU address
                 for submesh in quadMesh.submeshes {
                     renderEncoder.drawIndexedPrimitives(primitiveType: submesh.primitiveType,
                                                         indexCount: submesh.indexCount,
@@ -630,6 +628,7 @@ actor Renderer {
             // Use standard pipeline for demo cube
             renderEncoder.setRenderPipelineState(pipelineState)
             
+            // Set texture using argument table
             self.fragmentArgumentTable.setTexture(colorMap.gpuResourceID, index: TextureIndex.color.rawValue)
             
             for submesh in mesh.submeshes {
@@ -717,10 +716,8 @@ actor Renderer {
                         return nil 
                     }
                     
-                    // Get GPU resource ID (this should be valid if texture exists)
                     let gpuResourceID = texture.gpuResourceID
-                    
-                    print("Window '\(window.title)' has valid texture - GPU ID: \(gpuResourceID._impl)")
+                    print("Window '\(window.title ?? "Unknown")' has valid texture - GPU ID: \(gpuResourceID._impl)")
                     return WindowRenderData(
                         texture: texture,
                         textureGPUResourceID: gpuResourceID,

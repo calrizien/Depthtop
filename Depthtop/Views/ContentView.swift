@@ -12,7 +12,8 @@ struct ContentView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(\.supportsRemoteScenes) private var supportsRemoteScenes
     @State private var selectedWindows: Set<CGWindowID> = []
-    @State private var showPreview = true
+    @State private var showRealityKitPreview = false
+    @State private var showMetalPreview = true
     @State private var showDebugCapture = false
     
     var body: some View {
@@ -96,23 +97,31 @@ struct ContentView: View {
                             // Action buttons - arranged vertically for more space
                             VStack(spacing: 6) {
                                 HStack(spacing: 8) {
-                                    Button(action: { showPreview.toggle() }) {
-                                        Label(showPreview ? "Hide 3D Preview" : "Show 3D Preview", 
-                                              systemImage: showPreview ? "eye.slash" : "eye")
+                                    Button(action: { showMetalPreview.toggle() }) {
+                                        Label(showMetalPreview ? "Hide Metal" : "Show Metal", 
+                                              systemImage: showMetalPreview ? "square.stack.3d.down" : "square.stack")
                                     }
                                     .buttonStyle(.borderedProminent)
                                     .controlSize(.small)
+                                    .foregroundStyle(.purple)
                                     
-                                    #if DEBUG
-                                    Button(action: { showDebugCapture.toggle() }) {
-                                        Label(showDebugCapture ? "Hide Debug" : "Show Debug", 
-                                              systemImage: showDebugCapture ? "ladybug.slash" : "ladybug")
+                                    Button(action: { showRealityKitPreview.toggle() }) {
+                                        Label(showRealityKitPreview ? "Hide 3D Preview" : "Show 3D Preview", 
+                                              systemImage: showRealityKitPreview ? "eye.slash" : "eye")
                                     }
                                     .buttonStyle(.bordered)
                                     .controlSize(.small)
-                                    .foregroundStyle(.orange)
-                                    #endif
                                 }
+                                
+                                #if DEBUG
+                                Button(action: { showDebugCapture.toggle() }) {
+                                    Label(showDebugCapture ? "Hide Debug" : "Show Debug", 
+                                          systemImage: showDebugCapture ? "ladybug.slash" : "ladybug")
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                                .foregroundStyle(.orange)
+                                #endif
                                 
                                 ToggleImmersiveSpaceButton()
                             }
@@ -149,49 +158,63 @@ struct ContentView: View {
             }
             .frame(minWidth: 400)
             
-            // Right side: Preview panels
-            if showPreview || showDebugCapture {
-                if showPreview && showDebugCapture {
-                    // Show both side by side
-                    HSplitView {
+            // Right side: Preview panels (disabled when immersive space is open)
+            if appModel.immersiveSpaceState == .closed && (showRealityKitPreview || showMetalPreview || showDebugCapture) {
+                HStack(spacing: 0) {
+                    if showMetalPreview {
+                        MetalPreviewView()
+                            .environment(appModel)
+                            .frame(minWidth: 400, minHeight: 500)
+                    }
+                    
+                    if showRealityKitPreview {
                         RealityKitPreviewView()
                             .environment(appModel)
-                            .frame(minWidth: 600, minHeight: 500)
-                        
+                            .frame(minWidth: 400, minHeight: 500)
+                    }
+                    
+                    if showDebugCapture {
                         DebugCapturePreview()
                             .environment(appModel)
-                            .frame(minWidth: 400)
+                            .frame(minWidth: 300)
                     }
-                    .frame(minWidth: 1000, minHeight: 500)
-                } else if showPreview {
-                    // Show only 3D preview
-                    RealityKitPreviewView()
-                        .environment(appModel)
-                        .frame(minWidth: 800, minHeight: 600)
-                } else {
-                    // Show only debug capture
-                    DebugCapturePreview()
-                        .environment(appModel)
-                        .frame(minWidth: 400)
                 }
+            } else if appModel.immersiveSpaceState != .closed {
+                // Show a placeholder when immersive space is active
+                VStack {
+                    Spacer()
+                    Image(systemName: "visionpro")
+                        .font(.system(size: 60))
+                        .foregroundColor(.secondary)
+                    Text("Preview disabled")
+                        .font(.headline)
+                        .padding(.top)
+                    Text("Immersive space is active")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Spacer()
+                }
+                .frame(minWidth: 400, minHeight: 500)
+                .background(Color.black.opacity(0.2))
             }
         }
         .frame(width: totalWidth, height: 600)
     }
     
     private var totalWidth: CGFloat {
-        let hasRightPanel = showPreview || showDebugCapture
-        let rightPanelWidth: CGFloat
+        var rightPanelWidth: CGFloat = 0
         
-        if showPreview && showDebugCapture {
-            rightPanelWidth = 800  // Both panels side by side
-        } else if hasRightPanel {
-            rightPanelWidth = 400  // Single panel
-        } else {
-            rightPanelWidth = 0    // No right panel
+        if showMetalPreview {
+            rightPanelWidth += 400
+        }
+        if showRealityKitPreview {
+            rightPanelWidth += 400
+        }
+        if showDebugCapture {
+            rightPanelWidth += 300
         }
         
-        return 400 + rightPanelWidth  // Left panel (400) + right panel
+        return 400 + rightPanelWidth  // Left panel (400) + right panels
     }
 }
 

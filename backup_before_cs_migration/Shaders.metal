@@ -156,3 +156,50 @@ fragment float4 previewFragmentShader(PreviewVertexOut in [[stage_in]],
     }
     */
 }
+
+// MARK: - Metal Preview Shaders
+
+struct MetalPreviewUniforms {
+    float4x4 modelMatrix;
+    float4x4 viewMatrix;
+    float4x4 projectionMatrix;
+};
+
+vertex PreviewVertexOut metalPreviewVertexShader(PreviewVertex in [[stage_in]],
+                                                 constant MetalPreviewUniforms &uniforms [[buffer(1)]]) {
+    PreviewVertexOut out;
+    
+    // Get vertex data from attributes
+    float3 position = in.position;
+    float2 texCoord = in.texCoord;
+    
+    // Transform position
+    float4 worldPosition = uniforms.modelMatrix * float4(position, 1.0);
+    float4 viewPosition = uniforms.viewMatrix * worldPosition;
+    out.position = uniforms.projectionMatrix * viewPosition;
+    out.texCoord = texCoord;
+    
+    return out;
+}
+
+fragment float4 metalPreviewFragmentShader(PreviewVertexOut in [[stage_in]],
+                                          texture2d<float> windowTexture [[texture(0)]]) {
+    constexpr sampler windowSampler(address::clamp_to_edge,
+                                   mip_filter::linear,
+                                   mag_filter::linear,
+                                   min_filter::linear);
+    
+    // Check if texture exists
+    if (is_null_texture(windowTexture)) {
+        // Return a dark gray placeholder if no texture
+        return float4(0.2, 0.2, 0.2, 1.0);
+    }
+    
+    // Sample the window texture
+    float4 color = windowTexture.sample(windowSampler, in.texCoord);
+    
+    // Ensure full opacity
+    color.a = 1.0;
+    
+    return color;
+}

@@ -208,12 +208,14 @@ The RemoteImmersiveSpace is the centerpiece of Depthtop, enabling Mac-rendered c
 
 - ✅ Project created from Spatial Rendering App template
 - ✅ RemoteImmersiveSpace and CompositorServices configured
-- ✅ Basic Metal shader pipeline established
+- ✅ CS_HoverEffect rendering architecture integrated
+- ✅ Metal shader pipeline established with stereoscopic support
 - ✅ ScreenCaptureKit integration completed
 - ✅ Window texture conversion working (proven in RealityKit preview)
-- 🚧 Window rendering in Metal render loop
-- 🚧 Thread-safe texture data passing
-- ⏳ Multi-window spatial management system
+- ✅ Window rendering in Metal render loop using LayerRenderer
+- ✅ Thread-safe texture data passing via actor model
+- ✅ Multi-window spatial management system (grid, curved, stack)
+- ⏳ Vision Pro device testing pending
 - ⏳ 3D enhancement experiments pending
 
 ## Testing Approach
@@ -229,6 +231,21 @@ The RemoteImmersiveSpace is the centerpiece of Depthtop, enabling Mac-rendered c
 - [ScreenCaptureKit Guide](https://developer.apple.com/documentation/screencapturekit)
 - [Metal Spatial Rendering Sample](https://github.com/metal-by-example/metal-spatial-rendering)
 - Technical Report: "Stereoscopic Text Overlays for Mac Virtual Display"
+
+## Recent Major Changes (August 26, 2024)
+
+### CS_HoverEffect Integration
+- Completely replaced rendering architecture with CS_HoverEffect's proven LayerRenderer system
+- Added interactive hover effects for windows (scale, glow, edge highlighting)
+- Implemented MSAA-based hover tracking with TileResolvePipeline
+- Full spatial event handling for gaze-based interaction
+- See `aidocs/CS_HOVEREFFECT_INTEGRATION_SUMMARY.md` for complete details
+
+### Key Features Now Active
+- **Hover Effects**: Windows respond to gaze with visual feedback
+- **Tap Detection**: Ready for window interaction implementation
+- **Debug Mode**: Set `AppModel.debugColors = true` to visualize hover areas
+- **Window Arrangements**: Grid, curved, and stack layouts functional
 
 ## Critical Implementation Rules (MUST FOLLOW)
 
@@ -281,3 +298,4 @@ When passing textures between MainActor and renderer actor:
 - Keep strong references to `SCStreamOutput` objects to prevent deallocation
 - Update textures asynchronously to avoid blocking capture
 - Use `CVMetalTextureCache` for efficient texture conversion
+- we are working with compiled metal shaders, so when rebuilding the app, run a clean first when altering them so old compiled versions do not stick around.
