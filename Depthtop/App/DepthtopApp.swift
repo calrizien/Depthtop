@@ -27,7 +27,15 @@ struct DepthtopApp: App {
         WindowGroup {
             ContentView()
                 .environment(appModel)
-        }.defaultSize(CGSize(width: 800, height: 600))
+        }
+        .defaultSize(CGSize(width: 1000, height: 700))
+        
+        #if os(macOS)
+        Settings {
+            SettingsView()
+                .environment(appModel)
+        }
+        #endif
 
         #if os(macOS)
         RemoteImmersiveSpace(id: AppModel.immersiveSpaceId) {

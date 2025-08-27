@@ -2,75 +2,166 @@
 //  ToggleImmersiveSpaceButton.swift
 //  Depthtop
 //
-//  Created by Brandon Winston on 8/22/25.
+//  Button for macOS Tahoe (26.0) with RemoteImmersiveSpace support
 //
 
 import SwiftUI
 
 struct ToggleImmersiveSpaceButton: View {
-
     @Environment(AppModel.self) private var appModel
     @Environment(\.supportsRemoteScenes) private var supportsRemoteScenes
-
     @Environment(\.dismissImmersiveSpace) private var dismissImmersiveSpace
     @Environment(\.openImmersiveSpace) private var openImmersiveSpace
-
+    
+    private var buttonLabel: String {
+        switch appModel.immersiveSpaceState {
+        case .open:
+            return "Exit Spatial View"
+        case .closed:
+            return "Enter Spatial View"
+        case .inTransition:
+            return "Loading..."
+        }
+    }
+    
+    private var buttonIcon: String {
+        switch appModel.immersiveSpaceState {
+        case .open:
+            return "visionpro.slash"
+        case .closed:
+            return "visionpro"
+        case .inTransition:
+            return "hourglass"
+        }
+    }
+    
+    private var isDisabled: Bool {
+        !supportsRemoteScenes || appModel.immersiveSpaceState == .inTransition
+    }
+    
     var body: some View {
         Button {
-            Task { @MainActor in
-                guard supportsRemoteScenes else {
-                    print("Remote scenes are not supported on this Mac. Requires macOS 26.0+ beta.")
-                    return
-                }
-                
-                switch appModel.immersiveSpaceState {
-                    case .open:
-                        appModel.immersiveSpaceState = .inTransition
-                        await dismissImmersiveSpace()
-                        // Don't set immersiveSpaceState to .closed because there
-                        // are multiple paths to ImmersiveView.onDisappear().
-                        // Only set .closed in ImmersiveView.onDisappear().
-
-                    case .closed:
-                        appModel.immersiveSpaceState = .inTransition
-                        // Use AppModel.immersiveSpaceId from the new structure
-                        let result = await openImmersiveSpace(id: AppModel.immersiveSpaceId)
-                        switch result {
-                            case .opened:
-                                // Don't set immersiveSpaceState to .open because there
-                                // may be multiple paths to ImmersiveView.onAppear().
-                                // Only set .open in ImmersiveView.onAppear().
-                                break
-
-                            case .userCancelled:
-                                print("Immersive space opening cancelled by user.")
-                                appModel.immersiveSpaceState = .closed
-                            case .error:
-                                print("Error: Unable to present ImmersiveSpace for Scene id 'ImmersiveSpace'.")
-                                print("Make sure:")
-                                print("1. You're running macOS 26.0+ (Tahoe) beta")
-                                print("2. A Vision Pro device is connected to this Mac")
-                                print("   - On Vision Pro: Settings > General > Mac Virtual Display")
-                                appModel.immersiveSpaceState = .closed
-                            @unknown default:
-                                print("Unknown result from openImmersiveSpace: \(String(describing: result))")
-                                appModel.immersiveSpaceState = .closed
-                        }
-
-                    case .inTransition:
-                        // This case should not ever happen because button is disabled for this case.
-                        break
-                }
-            }
+            handleToggle()
         } label: {
-            Text(appModel.immersiveSpaceState == .open ? "Hide Immersive Space" : "Show Immersive Space")
+            Label(buttonLabel, systemImage: buttonIcon)
+                .symbolRenderingMode(.hierarchical)
+                .frame(maxWidth: .infinity)
         }
-        .disabled(appModel.immersiveSpaceState == .inTransition || !supportsRemoteScenes)
-        .animation(.none, value: 0)
-        .fontWeight(.semibold)
-        .help(!supportsRemoteScenes 
-            ? "Remote scenes not supported on this Mac (requires macOS 26.0+)"
-            : "Requires Vision Pro connected via Mac Virtual Display")
+        .buttonStyle(.borderedProminent)
+        .controlSize(.large)
+        .disabled(isDisabled)
+        .help(helpText)
+        .overlay(alignment: .topTrailing) {
+            if appModel.immersiveSpaceState == .inTransition {
+                ProgressView()
+                    .controlSize(.small)
+                    .offset(x: -8, y: 8)
+            }
+        }
+    }
+    
+    private var helpText: String {
+        if !supportsRemoteScenes {
+            return "Requires macOS 26.0+ and Vision Pro connection"
+        } else if appModel.immersiveSpaceState == .inTransition {
+            return "Please wait..."
+        } else if appModel.immersiveSpaceState == .open {
+            return "Exit the spatial view and return to desktop preview"
+        } else {
+            return "Enter spatial view to see windows in Vision Pro"
+        }
+    }
+    
+    private func handleToggle() {
+        Task { @MainActor in
+            guard supportsRemoteScenes else {
+                showConnectionError()
+                return
+            }
+            
+            switch appModel.immersiveSpaceState {
+            case .open:
+                appModel.immersiveSpaceState = .inTransition
+                await dismissImmersiveSpace()
+                
+            case .closed:
+                appModel.immersiveSpaceState = .inTransition
+                let result = await openImmersiveSpace(id: AppModel.immersiveSpaceId)
+                handleOpenResult(result)
+                
+            case .inTransition:
+                break
+            }
+        }
+    }
+    
+    private func handleOpenResult(_ result: OpenImmersiveSpaceAction.Result) {
+        switch result {
+        case .opened:
+            // State will be set by ImmersiveView.onAppear()
+            break
+            
+        case .userCancelled:
+            appModel.immersiveSpaceState = .closed
+            
+        case .error:
+            showConnectionError()
+            appModel.immersiveSpaceState = .closed
+            
+        @unknown default:
+            appModel.immersiveSpaceState = .closed
+        }
+    }
+    
+    private func showConnectionError() {
+        // In a real app, this could show an alert
+        print("❌ Cannot connect to Vision Pro")
+        print("Ensure Vision Pro is connected via Mac Virtual Display")
     }
 }
 
+// Compact version for toolbars
+struct CompactImmersiveSpaceToggle: View {
+    @Environment(AppModel.self) private var appModel
+    @Environment(\.supportsRemoteScenes) private var supportsRemoteScenes
+    @Environment(\.dismissImmersiveSpace) private var dismissImmersiveSpace
+    @Environment(\.openImmersiveSpace) private var openImmersiveSpace
+    
+    var body: some View {
+        Button {
+            Task {
+                await toggleImmersiveSpace()
+            }
+        } label: {
+            Image(systemName: appModel.immersiveSpaceState == .open ? "visionpro.slash" : "visionpro")
+                .symbolRenderingMode(.hierarchical)
+        }
+        .buttonStyle(.borderless)
+        .disabled(!supportsRemoteScenes || appModel.immersiveSpaceState == .inTransition)
+        .help(appModel.immersiveSpaceState == .open ? "Exit Spatial View" : "Enter Spatial View")
+    }
+    
+    private func toggleImmersiveSpace() async {
+        guard supportsRemoteScenes else { return }
+        
+        if appModel.immersiveSpaceState == .open {
+            appModel.immersiveSpaceState = .inTransition
+            await dismissImmersiveSpace()
+        } else if appModel.immersiveSpaceState == .closed {
+            appModel.immersiveSpaceState = .inTransition
+            _ = await openImmersiveSpace(id: AppModel.immersiveSpaceId)
+        }
+    }
+}
+
+#Preview("Button") {
+    VStack(spacing: 20) {
+        ToggleImmersiveSpaceButton()
+            .environment(AppModel())
+            .frame(width: 250)
+        
+        CompactImmersiveSpaceToggle()
+            .environment(AppModel())
+    }
+    .padding()
+}
