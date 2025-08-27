@@ -28,10 +28,16 @@ extension RenderData {
         
         logger.info("[RENDERLOOP] Pipeline verified, entering main loop")
         
+        var frameCount = 0
         while renderer.state != .invalidated {
             guard let frame = renderer.queryNextFrame() else { 
                 logger.debug("[RENDERLOOP] No frame available, continuing")
                 continue 
+            }
+            
+            frameCount += 1
+            if frameCount % 60 == 0 {  // Log every 60 frames (about 1 second)
+                logger.info("[RENDERLOOP] Frame \(frameCount) rendering...")
             }
             frame.startUpdate()
             frame.endUpdate()
@@ -140,8 +146,20 @@ extension RenderData {
         projectionMatrices: [simd_float4x4]
     ) async {
         // Get captured windows from the app model
-        guard let model = _appModel else { return }
+        guard let model = _appModel else { 
+            logger.warning("[RENDER] No app model available")
+            return 
+        }
         let capturedWindows = await MainActor.run { model.capturedWindows }
+        
+        if capturedWindows.isEmpty {
+            logger.warning("[RENDER] No captured windows to render")
+            // Render a debug quad to verify pipeline is working
+            await renderDebugQuad(encoder: encoder, viewMatrices: viewMatrices, projectionMatrices: projectionMatrices)
+            return
+        }
+        
+        logger.info("[RENDER] Rendering \(capturedWindows.count) window(s)")
         
         for (index, capturedWindow) in capturedWindows.enumerated() {
             // Get the window's texture (using the stored Metal texture)
@@ -152,7 +170,8 @@ extension RenderData {
             
             // Calculate window position in 3D space
             let position = await getWindowPosition(index: index, total: capturedWindows.count)
-            let modelMatrix = matrix4x4_translation(position.x, position.y, position.z) * rootTransform
+            // Don't multiply by rootTransform - it already positions at -2.0 Z
+            let modelMatrix = matrix4x4_translation(position.x, position.y, position.z)
             
             // Create WindowUniformsArray with data for both eyes
             var uniformsArray = WindowUniformsArray()
@@ -185,8 +204,11 @@ extension RenderData {
     
     /// Gets the window position in 3D space based on arrangement
     private func getWindowPosition(index: Int, total: Int) async -> SIMD3<Float> {
-        guard let model = _appModel else { return SIMD3<Float>(0, 0, 0) }
+        guard let model = _appModel else { return SIMD3<Float>(0, 0, -2.0) }
         let arrangement = await MainActor.run { model.windowArrangement }
+        
+        // Base distance from viewer
+        let baseDistance: Float = -2.0
         
         switch arrangement {
         case .grid:
@@ -195,28 +217,28 @@ extension RenderData {
             let row = index / cols
             let col = index % cols
             return SIMD3<Float>(
-                Float(col - 1) * 2.5,  // X spacing
-                Float(1 - row) * 2.0,   // Y spacing
-                0                       // Z (all at same depth)
+                Float(col - 1) * 1.2,   // X spacing (reduced for better viewing)
+                Float(1 - row) * 0.8,   // Y spacing (reduced)
+                baseDistance            // Z (2 meters in front)
             )
             
         case .curved:
             // Arrange in a curve around the user
-            let angleStep = Float.pi / 6  // 30 degrees
+            let angleStep = Float.pi / 8  // 22.5 degrees
             let angle = Float(index - total/2) * angleStep
-            let radius: Float = 3.0
+            let radius: Float = 2.5
             return SIMD3<Float>(
-                sin(angle) * radius,    // X
-                0,                      // Y (all at same height)
-                -cos(angle) * radius    // Z
+                sin(angle) * radius,         // X
+                0,                          // Y (all at same height)
+                baseDistance - cos(angle) * 0.5  // Z (slight curve depth)
             )
             
         case .stack:
             // Stack windows with depth
             return SIMD3<Float>(
-                0,                      // X (centered)
-                0,                      // Y (centered)
-                Float(index) * -0.5     // Z (stacked in depth)
+                0,                          // X (centered)
+                0,                          // Y (centered)
+                baseDistance + Float(index) * -0.3  // Z (stacked from -2.0 backwards)
             )
         }
     }
@@ -267,6 +289,49 @@ private func matrix4x4_translation(_ x: Float, _ y: Float, _ z: Float) -> simd_f
         [0, 0, 1, 0],
         [x, y, z, 1]
     )
+}
+
+extension RenderData {
+    /// Renders a debug quad to verify the render pipeline is working
+    private func renderDebugQuad(
+        encoder: MTLRenderCommandEncoder,
+        viewMatrices: [simd_float4x4],
+        projectionMatrices: [simd_float4x4]
+    ) async {
+        logger.info("[DEBUG] Rendering debug quad")
+        
+        // Position the debug quad in front of the viewer
+        let position = SIMD3<Float>(0, 0, -2.0)  // 2 meters in front
+        let modelMatrix = matrix4x4_translation(position.x, position.y, position.z)
+        
+        // Create WindowUniformsArray for the debug quad
+        var uniformsArray = WindowUniformsArray()
+        
+        // Fill uniforms for each eye
+        for eyeIndex in 0..<min(viewMatrices.count, 2) {
+            uniformsArray.setUniforms(at: eyeIndex, uniforms: WindowUniforms(
+                modelMatrix: modelMatrix,
+                viewMatrix: viewMatrices[eyeIndex],
+                projectionMatrix: projectionMatrices[eyeIndex]
+            ))
+        }
+        
+        // Set debug data
+        uniformsArray.windowID = 9999  // Debug ID
+        uniformsArray.isHovered = 0
+        uniformsArray.hoverProgress = 0.0
+        
+        // Set uniforms
+        encoder.setVertexBytes(&uniformsArray, length: MemoryLayout<WindowUniformsArray>.size, index: 0)
+        encoder.setFragmentBytes(&uniformsArray, length: MemoryLayout<WindowUniformsArray>.size, index: 0)
+        
+        // No texture for debug quad - shader will use a solid color
+        
+        // Draw the debug quad
+        encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6)
+        
+        logger.info("[DEBUG] Debug quad drawn")
+    }
 }
 
 

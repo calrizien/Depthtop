@@ -86,12 +86,24 @@ vertex WindowVertexOut windowVertex(uint vertexID [[vertex_id]],
 
 // Fragment shader for window rendering with hover effects
 fragment FragmentOut windowFragment(WindowVertexOut in [[stage_in]],
-                                   texture2d<float> windowTexture [[texture(0)]],
+                                   texture2d<float, access::sample> windowTexture [[texture(0)]],
                                    constant WindowUniformsArray& uniformsArray [[buffer(0)]]) {
     constexpr sampler textureSampler(mag_filter::linear, min_filter::linear);
     
-    // Sample the window texture
-    float4 color = windowTexture.sample(textureSampler, in.texCoord);
+    float4 color;
+    
+    // Check if texture is bound
+    if (is_null_texture(windowTexture)) {
+        // Use debug color if no texture (red for debug quad)
+        if (uniformsArray.windowID == 9999) {
+            color = float4(1.0, 0.0, 0.0, 1.0);  // Red debug quad
+        } else {
+            color = float4(0.2, 0.2, 0.8, 1.0);  // Blue for windows without texture
+        }
+    } else {
+        // Sample the window texture
+        color = windowTexture.sample(textureSampler, in.texCoord);
+    }
     
     // Apply hover highlight effect
     if (use_hover_effect && uniformsArray.isHovered) {
