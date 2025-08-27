@@ -35,15 +35,28 @@ struct ContentView: View {
         // Tahoe-specific: Show Vision Pro connection status in toolbar
         .toolbar {
             ToolbarItem(placement: .status) {
-                if supportsRemoteScenes {
-                    Label("Vision Pro Connected", systemImage: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
-                        .labelStyle(.iconOnly)
-                } else {
-                    Label("Vision Pro Not Connected", systemImage: "xmark.circle.fill")
-                        .foregroundStyle(.red)
-                        .labelStyle(.iconOnly)
+                HStack(spacing: 6) {
+                    if supportsRemoteScenes {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                            .symbolEffect(.pulse, isActive: true)
+                        Text("Vision Pro Connected")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                        Text("Vision Pro Not Connected")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(.regularMaterial, in: Capsule())
+                .help(supportsRemoteScenes 
+                    ? "Vision Pro is connected and ready for spatial viewing" 
+                    : "Connect your Vision Pro via Mac Virtual Display to use spatial features")
             }
         }
     }
@@ -53,16 +66,42 @@ struct ContentView: View {
     private var sidebar: some View {
         List(selection: $selectedWindows) {
             Section {
-                // Immersive Space Control
-                VStack(spacing: 8) {
+                // Connection Status Card
+                VStack(spacing: 12) {
+                    HStack {
+                        Image(systemName: supportsRemoteScenes ? "visionpro" : "visionpro.slash")
+                            .font(.title2)
+                            .foregroundStyle(supportsRemoteScenes ? .green : .orange)
+                            .symbolEffect(.bounce, value: supportsRemoteScenes)
+                        
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(supportsRemoteScenes ? "Ready to Stream" : "Vision Pro Required")
+                                .font(.headline)
+                            Text(supportsRemoteScenes 
+                                ? "Your Vision Pro is connected"
+                                : "Connect via Mac Virtual Display")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        
+                        Spacer()
+                    }
+                    .padding(12)
+                    .background(supportsRemoteScenes 
+                        ? Color.green.opacity(0.1) 
+                        : Color.orange.opacity(0.1))
+                    .cornerRadius(8)
+                    
+                    // Immersive Space Control
                     ToggleImmersiveSpaceButton()
                         .buttonStyle(.borderedProminent)
                         .controlSize(.large)
                     
                     if appModel.immersiveSpaceState == .open {
-                        Label("Immersive space active", systemImage: "checkmark.circle.fill")
+                        Label("Streaming to Vision Pro", systemImage: "dot.radiowaves.left.and.right")
                             .foregroundStyle(.green)
                             .font(.caption)
+                            .symbolEffect(.variableColor.iterative, isActive: true)
                     }
                 }
                 .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
