@@ -126,7 +126,8 @@ extension RenderData {
             renderPassDescriptor.renderTargetArrayLength = drawable.views.count
         }
         
-        // Create render command encoder
+        // Create render command encoder directly from command buffer
+        // For progressive immersion, we'll handle the drawable presentation properly at the end
         guard let renderEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor) else {
             logger.error("Failed to create render encoder")
             return
@@ -165,7 +166,7 @@ extension RenderData {
         // End encoding
         renderEncoder.endEncoding()
         
-        // Encode drawable presentation
+        // Encode drawable presentation - this works for both progressive and full immersion
         drawable.encodePresent(commandBuffer: commandBuffer)
     }
     
