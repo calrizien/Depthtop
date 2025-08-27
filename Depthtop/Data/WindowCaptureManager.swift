@@ -184,6 +184,7 @@ class WindowCaptureManager: NSObject {
             
             // Optimize for our use case
             config.capturesAudio = false
+            config.excludesCurrentProcessAudio = true  // Explicitly exclude audio to prevent factory warnings
             config.showsCursor = false
             
             // Set frame rate for smooth capture but not excessive GPU load
