@@ -154,23 +154,32 @@ extension RenderData {
             let position = await getWindowPosition(index: index, total: capturedWindows.count)
             let modelMatrix = matrix4x4_translation(position.x, position.y, position.z) * rootTransform
             
-            // Create uniform data for each eye
-            for eyeIndex in 0..<viewMatrices.count {
-                var uniforms = WindowUniforms(
+            // Create WindowUniformsArray with data for both eyes
+            var uniformsArray = WindowUniformsArray()
+            
+            // Fill uniforms for each eye
+            for eyeIndex in 0..<min(viewMatrices.count, 2) {
+                uniformsArray.setUniforms(at: eyeIndex, uniforms: WindowUniforms(
                     modelMatrix: modelMatrix,
                     viewMatrix: viewMatrices[eyeIndex],
                     projectionMatrix: projectionMatrices[eyeIndex]
-                )
-                
-                // Set uniforms
-                encoder.setVertexBytes(&uniforms, length: MemoryLayout<WindowUniforms>.size, index: 0)
-                
-                // Set texture
-                encoder.setFragmentTexture(texture, index: 0)
-                
-                // Draw window quad (6 vertices for a quad)
-                encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6)
+                ))
             }
+            
+            // Set hover tracking data
+            uniformsArray.windowID = UInt16(index)  // Use index as window ID for now
+            uniformsArray.isHovered = 0  // Not hovered for now
+            uniformsArray.hoverProgress = 0.0
+            
+            // Set uniforms for both vertex and fragment shaders
+            encoder.setVertexBytes(&uniformsArray, length: MemoryLayout<WindowUniformsArray>.size, index: 0)
+            encoder.setFragmentBytes(&uniformsArray, length: MemoryLayout<WindowUniformsArray>.size, index: 0)
+            
+            // Set texture
+            encoder.setFragmentTexture(texture, index: 0)
+            
+            // Draw window quad (6 vertices for a quad)
+            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6)
         }
     }
     

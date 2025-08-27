@@ -36,11 +36,27 @@ struct DepthtopApp: App {
                     remoteDevice: remoteDeviceIdentifier
                 ))
             }
+            .onAppear {
+                print("RemoteImmersiveSpace appeared")
+                appModel.immersiveSpaceState = .open
+            }
+            .onDisappear {
+                print("RemoteImmersiveSpace disappeared") 
+                appModel.immersiveSpaceState = .closed
+            }
         }
         .immersionStyle(selection: .constant(.full), in: .full)
         #else
         ImmersiveSpace(id: AppModel.immersiveSpaceId) {
             makeCompositorLayer(.init())
+                .onAppear {
+                    print("ImmersiveSpace appeared")
+                    appModel.immersiveSpaceState = .open
+                }
+                .onDisappear {
+                    print("ImmersiveSpace disappeared")
+                    appModel.immersiveSpaceState = .closed
+                }
         }
         .immersionStyle(selection: .constant(.full), in: .full)
         #endif
