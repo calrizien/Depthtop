@@ -127,32 +127,46 @@ struct ContentView: View {
                 .labelStyle(.titleAndIcon)
             }
             
-            Section("Immersion Settings") {
-                Toggle(isOn: Binding(
-                    get: { appModel.useProgressiveImmersion },
-                    set: { newValue in
-                        // Close immersive space if it's open to apply the change
-                        if appModel.immersiveSpaceState == .open {
-                            // The toggle will take effect when space is reopened
+            Section("Immersion Style") {
+                VStack(alignment: .leading, spacing: 8) {
+                    // Segmented picker for immersion style
+                    Picker("Immersion Style", selection: Binding(
+                        get: { appModel.useProgressiveImmersion },
+                        set: { newValue in
+                            appModel.useProgressiveImmersion = newValue
                         }
-                        appModel.useProgressiveImmersion = newValue
+                    )) {
+                        Text("Full").tag(false)
+                        Text("Progressive").tag(true)
                     }
-                )) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Label("Progressive Immersion", systemImage: appModel.useProgressiveImmersion ? "dial.medium" : "dial.high")
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    
+                    // Description of selected mode
+                    HStack(spacing: 6) {
+                        Image(systemName: appModel.useProgressiveImmersion ? "dial.medium" : "dial.high.fill")
+                            .foregroundStyle(appModel.useProgressiveImmersion ? .blue : .green)
+                            .imageScale(.small)
+                        
                         Text(appModel.useProgressiveImmersion 
-                            ? "Adjust immersion with Digital Crown"
-                            : "Full immersion mode")
+                            ? "Control immersion level with Digital Crown"
+                            : "Complete spatial environment")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
-                }
-                .toggleStyle(.switch)
-                
-                if appModel.immersiveSpaceState == .open && appModel.useProgressiveImmersion {
-                    Label("Note: Reopen immersive space to apply", systemImage: "info.circle")
-                        .font(.caption)
-                        .foregroundStyle(.orange)
+                    
+                    // Warning if space is open
+                    if appModel.immersiveSpaceState == .open {
+                        HStack(spacing: 4) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.orange)
+                                .imageScale(.small)
+                            Text("Reopen spatial view to apply")
+                                .font(.caption2)
+                                .foregroundStyle(.orange)
+                        }
+                        .padding(.top, 2)
+                    }
                 }
             }
             

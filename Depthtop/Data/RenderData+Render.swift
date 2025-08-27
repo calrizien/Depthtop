@@ -133,11 +133,17 @@ extension RenderData {
         var useProgressiveImmersion = false
         if let model = _appModel {
             useProgressiveImmersion = await MainActor.run { model.useProgressiveImmersion }
+            logger.info("[RENDER] Immersion mode: \(useProgressiveImmersion ? "Progressive" : "Full")")
+        } else {
+            logger.warning("[RENDER] No app model - defaulting to full immersion")
         }
         
         // For progressive immersion, we need to add a render context to the drawable
         // For full immersion, we use the command buffer directly
         let renderContext = useProgressiveImmersion ? drawable.addRenderContext(commandBuffer: commandBuffer) : nil
+        if useProgressiveImmersion {
+            logger.info("[RENDER] Created render context for progressive immersion")
+        }
         
         // Create render command encoder from the command buffer
         guard let renderEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor) else {
