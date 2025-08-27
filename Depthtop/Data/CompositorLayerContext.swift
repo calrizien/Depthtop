@@ -7,6 +7,7 @@
 
 import Foundation
 import CompositorServices
+import SwiftUI
 #if os(macOS)
 import ARKit
 #endif
@@ -14,16 +15,10 @@ import ARKit
 /// Context for the compositor layer
 struct CompositorLayerContext {
     #if os(macOS)
-    // Store as Any? to avoid direct type dependency
-    var remoteDevice: Any?
+    var remoteDeviceIdentifier: RemoteDeviceIdentifier?
     
-    init(remoteDevice: Any? = nil) {
-        self.remoteDevice = remoteDevice
-    }
-    
-    // Computed property to safely access the device if available
-    var remoteDeviceIdentifier: Any? {
-        return remoteDevice
+    init(remoteDeviceIdentifier: RemoteDeviceIdentifier? = nil) {
+        self.remoteDeviceIdentifier = remoteDeviceIdentifier
     }
     #else
     init() {}

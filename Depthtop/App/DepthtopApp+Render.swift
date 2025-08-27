@@ -19,6 +19,15 @@ extension DepthtopApp {
     func render(_ renderer: LayerRenderer, context: CompositorLayerContext) {
         logger.info("[RENDER START] Beginning render setup for immersive space")
         
+        #if os(macOS)
+        // Check if we have a valid remote device identifier
+        if context.remoteDeviceIdentifier == nil {
+            logger.warning("[RENDER] No RemoteDeviceIdentifier available - Vision Pro may not be connected")
+        } else {
+            logger.info("[RENDER] RemoteDeviceIdentifier available - Vision Pro connection established")
+        }
+        #endif
+        
         Task.detached(priority: .high) {
             logger.info("[RENDER] Creating RenderData instance")
             

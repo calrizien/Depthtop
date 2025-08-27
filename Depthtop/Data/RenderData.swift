@@ -89,9 +89,8 @@ actor RenderData {
         theAppModel: AppModel
     ) {
         #if os(macOS)
-        // On macOS, ARKitSession requires a device identifier
-        // TODO: Create session when we have proper RemoteDeviceIdentifier type
-        session = nil
+        // On macOS, create ARKitSession with the remote device identifier if available
+        session = context.remoteDeviceIdentifier.map { ARKitSession(device: $0) }
         #else
         session = ARKitSession()
         #endif
@@ -282,14 +281,16 @@ actor RenderData {
     /// Sets up world tracking
     func setUpWorldTracking() async {
         guard let session = session else {
-            logger.warning("No ARKit session available")
+            logger.warning("No ARKit session available - world tracking disabled")
             return
         }
         
         do {
             if WorldTrackingProvider.isSupported {
                 try await session.run([worldTracking])
-                logger.info("World tracking started")
+                logger.info("World tracking started successfully")
+            } else {
+                logger.warning("WorldTrackingProvider not supported on this device")
             }
         } catch {
             logger.error("Failed to start world tracking: \(error)")

@@ -33,7 +33,7 @@ struct DepthtopApp: App {
         RemoteImmersiveSpace(id: AppModel.immersiveSpaceId) {
             MacOSLayer { remoteDeviceIdentifier in
                 makeCompositorLayer(CompositorLayerContext(
-                    remoteDevice: remoteDeviceIdentifier
+                    remoteDeviceIdentifier: remoteDeviceIdentifier
                 ))
             }
             .onAppear {
@@ -65,15 +65,13 @@ struct DepthtopApp: App {
 
 #if os(macOS)
 struct MacOSLayer: CompositorContent {
-    // Access the actual RemoteDeviceIdentifier type
     @Environment(\.remoteDeviceIdentifier)
     private var remoteDeviceIdentifier: RemoteDeviceIdentifier?
 
-    // But pass it as Any? to avoid type issues
-    let closure: (Any?) -> CompositorLayer
+    let closure: (RemoteDeviceIdentifier?) -> CompositorLayer
 
     var body: some CompositorContent {
-        closure(remoteDeviceIdentifier as Any?)
+        closure(remoteDeviceIdentifier)
     }
 }
 #endif
