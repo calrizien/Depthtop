@@ -180,8 +180,11 @@ extension RenderData {
             logger.warning("[RENDER] No app model - defaulting to full immersion")
         }
         
-        // For progressive immersion, we need to add a render context to the drawable
-        // For full immersion, we use the command buffer directly
+        // IMPORTANT: Render context is REQUIRED for progressive immersion
+        // Progressive immersion allows the user to control immersion level with the Digital Crown,
+        // which requires special frame composition handled by the render context.
+        // The render context will take ownership of the encoder's lifecycle.
+        // For full immersion, we use the command buffer directly without a render context.
         let renderContext = useProgressiveImmersion ? drawable.addRenderContext(commandBuffer: commandBuffer) : nil
         if useProgressiveImmersion {
             logger.info("[RENDER] Created render context for progressive immersion")
@@ -223,12 +226,16 @@ extension RenderData {
             projectionMatrices: projectionMatrices
         )
         
-        // End encoding - must handle differently for progressive vs full immersion
+        // CRITICAL: Encoder lifecycle differs between immersion modes
+        // This MUST be handled correctly or Metal will crash with "encoding has ended" errors
         if let renderContext = renderContext {
-            // For progressive immersion, the render context ends the encoder
+            // PROGRESSIVE IMMERSION: The render context takes ownership of the encoder
+            // and will call endEncoding() internally. We must NOT call it ourselves.
+            // The render context manages the encoder's lifecycle for proper frame composition.
             renderContext.endEncoding(commandEncoder: renderEncoder)
         } else {
-            // For full immersion, end the encoder directly
+            // FULL IMMERSION: We directly manage the encoder lifecycle.
+            // We must explicitly end encoding before presenting the drawable.
             renderEncoder.endEncoding()
         }
         
