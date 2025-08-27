@@ -90,7 +90,8 @@ actor RenderData {
     ) {
         #if os(macOS)
         // On macOS, ARKitSession requires a device identifier
-        session = nil  // Will be set later if we get a proper device
+        // TODO: Create session when we have proper RemoteDeviceIdentifier type
+        session = nil
         #else
         session = ARKitSession()
         #endif

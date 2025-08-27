@@ -99,7 +99,7 @@ struct ContentView: View {
                                 HStack(spacing: 8) {
                                     Button(action: { showMetalPreview.toggle() }) {
                                         Label(showMetalPreview ? "Hide Metal" : "Show Metal", 
-                                              systemImage: showMetalPreview ? "square.stack.3d.down" : "square.stack")
+                                              systemImage: showMetalPreview ? "square.stack.3d.down.right.fill" : "square.stack")
                                     }
                                     .buttonStyle(.borderedProminent)
                                     .controlSize(.small)
