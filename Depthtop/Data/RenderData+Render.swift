@@ -223,12 +223,13 @@ extension RenderData {
             projectionMatrices: projectionMatrices
         )
         
-        // End encoding
-        renderEncoder.endEncoding()
-        
-        // End the render context with the encoder (only for progressive immersion)
+        // End encoding - must handle differently for progressive vs full immersion
         if let renderContext = renderContext {
+            // For progressive immersion, the render context ends the encoder
             renderContext.endEncoding(commandEncoder: renderEncoder)
+        } else {
+            // For full immersion, end the encoder directly
+            renderEncoder.endEncoding()
         }
         
         // Encode drawable presentation
