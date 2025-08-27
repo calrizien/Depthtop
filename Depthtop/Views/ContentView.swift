@@ -127,6 +127,35 @@ struct ContentView: View {
                 .labelStyle(.titleAndIcon)
             }
             
+            Section("Immersion Settings") {
+                Toggle(isOn: Binding(
+                    get: { appModel.useProgressiveImmersion },
+                    set: { newValue in
+                        // Close immersive space if it's open to apply the change
+                        if appModel.immersiveSpaceState == .open {
+                            // The toggle will take effect when space is reopened
+                        }
+                        appModel.useProgressiveImmersion = newValue
+                    }
+                )) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Label("Progressive Immersion", systemImage: appModel.useProgressiveImmersion ? "dial.medium" : "dial.high")
+                        Text(appModel.useProgressiveImmersion 
+                            ? "Adjust immersion with Digital Crown"
+                            : "Full immersion mode")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .toggleStyle(.switch)
+                
+                if appModel.immersiveSpaceState == .open && appModel.useProgressiveImmersion {
+                    Label("Note: Reopen immersive space to apply", systemImage: "info.circle")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+            }
+            
             Section("Available Windows (\(filteredWindows.count))") {
                 ForEach(filteredWindows, id: \.windowID) { window in
                     WindowRow(

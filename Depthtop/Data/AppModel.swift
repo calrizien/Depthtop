@@ -30,6 +30,9 @@ class AppModel {
     }
     var immersiveSpaceState = ImmersiveSpaceState.closed
     
+    // Immersion style control (full vs progressive)
+    var useProgressiveImmersion: Bool = false  // Default to full for stability
+    
     // MARK: - Window Capture Management (from original Depthtop)
     let windowCaptureManager = WindowCaptureManager()
     

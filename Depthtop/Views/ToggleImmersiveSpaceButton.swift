@@ -18,7 +18,8 @@ struct ToggleImmersiveSpaceButton: View {
         case .open:
             return "Exit Spatial View"
         case .closed:
-            return "Enter Spatial View"
+            let mode = appModel.useProgressiveImmersion ? "(Progressive)" : "(Full)"
+            return "Enter Spatial View \(mode)"
         case .inTransition:
             return "Loading..."
         }

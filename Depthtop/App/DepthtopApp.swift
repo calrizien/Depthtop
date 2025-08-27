@@ -53,7 +53,7 @@ struct DepthtopApp: App {
                 appModel.immersiveSpaceState = .closed
             }
         }
-        .immersionStyle(selection: .constant(.progressive), in: .progressive)
+        .immersionStyle(selection: .constant(appModel.useProgressiveImmersion ? .progressive : .full), in: appModel.useProgressiveImmersion ? .progressive : .full)
         #else
         ImmersiveSpace(id: AppModel.immersiveSpaceId) {
             makeCompositorLayer(.init())
@@ -66,7 +66,7 @@ struct DepthtopApp: App {
                     appModel.immersiveSpaceState = .closed
                 }
         }
-        .immersionStyle(selection: .constant(.progressive), in: .progressive)
+        .immersionStyle(selection: .constant(appModel.useProgressiveImmersion ? .progressive : .full), in: appModel.useProgressiveImmersion ? .progressive : .full)
         #endif
     }
 }
