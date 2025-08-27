@@ -94,12 +94,15 @@ extension RenderData {
         let time = LayerRenderer.Clock.Instant.epoch.duration(to: drawable.frameTiming.presentationTime).timeInterval
         
         // Set device anchor for both macOS (RemoteImmersiveSpace) and visionOS
+        // Try to get device anchor - it might not be available immediately
         let deviceAnchor = worldTracking.queryDeviceAnchor(atTimestamp: time)
         if let deviceAnchor = deviceAnchor {
             drawable.deviceAnchor = deviceAnchor
             logger.debug("[RENDER] Device anchor set for frame")
         } else {
-            logger.warning("[RENDER] No device anchor available - drawable won't be presented properly")
+            // Device anchor might not be available on first frames or when tracking is initializing
+            // Try to use a default identity transform for now
+            logger.warning("[RENDER] No device anchor available yet - using identity transform")
         }
         
         // Get the drawable's render targets
@@ -126,8 +129,11 @@ extension RenderData {
             renderPassDescriptor.renderTargetArrayLength = drawable.views.count
         }
         
-        // Create render command encoder directly from command buffer
-        // For progressive immersion, we'll handle the drawable presentation properly at the end
+        // For progressive immersion, we need to add a render context to the drawable
+        // This is required by CompositorServices when using progressive immersion style
+        let renderContext = drawable.addRenderContext(commandBuffer: commandBuffer)
+        
+        // Create render command encoder from the command buffer (not the context)
         guard let renderEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor) else {
             logger.error("Failed to create render encoder")
             return
@@ -166,7 +172,10 @@ extension RenderData {
         // End encoding
         renderEncoder.endEncoding()
         
-        // Encode drawable presentation - this works for both progressive and full immersion
+        // End the render context with the encoder (required for progressive immersion)
+        renderContext.endEncoding(commandEncoder: renderEncoder)
+        
+        // Encode drawable presentation
         drawable.encodePresent(commandBuffer: commandBuffer)
     }
     
