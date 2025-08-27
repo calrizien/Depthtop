@@ -30,8 +30,35 @@ class AppModel {
     }
     var immersiveSpaceState = ImmersiveSpaceState.closed
     
-    // Immersion style control (full vs progressive)
-    var useProgressiveImmersion: Bool = false  // Default to full for stability
+    // Immersion style control (mixed vs progressive vs full)
+    enum ImmersionStylePreference: String, CaseIterable {
+        case mixed = "Mixed"
+        case progressive = "Progressive"
+        case full = "Full"
+        
+        var description: String {
+            switch self {
+            case .mixed:
+                return "Blend with real environment"
+            case .progressive:
+                return "Control with Digital Crown"
+            case .full:
+                return "Complete spatial environment"
+            }
+        }
+        
+        var systemImage: String {
+            switch self {
+            case .mixed:
+                return "rectangle.on.rectangle"
+            case .progressive:
+                return "dial.medium"
+            case .full:
+                return "dial.high.fill"
+            }
+        }
+    }
+    var selectedImmersionStyle: ImmersionStylePreference = .mixed  // Default to mixed for MVD compatibility
     
     // MARK: - Window Capture Management (from original Depthtop)
     let windowCaptureManager = WindowCaptureManager()

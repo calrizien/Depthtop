@@ -171,23 +171,26 @@ extension RenderData {
             renderPassDescriptor.renderTargetArrayLength = drawable.views.count
         }
         
-        // Check if we're using progressive immersion (requires render context)
-        var useProgressiveImmersion = false
+        // Check immersion style (requires render context for progressive and mixed)
+        var immersionStyle = AppModel.ImmersionStylePreference.full
+        var requiresRenderContext = false
         if let model = _appModel {
-            useProgressiveImmersion = await MainActor.run { model.useProgressiveImmersion }
-            logger.info("[RENDER] Immersion mode: \(useProgressiveImmersion ? "Progressive" : "Full")")
+            immersionStyle = await MainActor.run { model.selectedImmersionStyle }
+            requiresRenderContext = (immersionStyle == .progressive || immersionStyle == .mixed)
+            logger.info("[RENDER] Immersion mode: \(immersionStyle.rawValue)")
         } else {
             logger.warning("[RENDER] No app model - defaulting to full immersion")
         }
         
-        // IMPORTANT: Render context is REQUIRED for progressive immersion
+        // IMPORTANT: Render context is REQUIRED for progressive and mixed immersion
         // Progressive immersion allows the user to control immersion level with the Digital Crown,
-        // which requires special frame composition handled by the render context.
+        // Mixed immersion blends virtual content with passthrough environment.
+        // Both require special frame composition handled by the render context.
         // The render context will take ownership of the encoder's lifecycle.
         // For full immersion, we use the command buffer directly without a render context.
-        let renderContext = useProgressiveImmersion ? drawable.addRenderContext(commandBuffer: commandBuffer) : nil
-        if useProgressiveImmersion {
-            logger.info("[RENDER] Created render context for progressive immersion")
+        let renderContext = requiresRenderContext ? drawable.addRenderContext(commandBuffer: commandBuffer) : nil
+        if requiresRenderContext {
+            logger.info("[RENDER] Created render context for \(immersionStyle.rawValue) immersion")
         }
         
         // Create render command encoder from the command buffer

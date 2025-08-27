@@ -22,6 +22,22 @@ struct DepthtopApp: App {
     
     @Environment(\.openImmersiveSpace) var openImmersiveSpace
     @Environment(\.dismissImmersiveSpace) var dismissImmersiveSpace
+    
+    private var immersionStyleForApp: ImmersionStyle {
+        switch appModel.selectedImmersionStyle {
+        case .mixed:
+            // Mixed might not be available on macOS, fallback to progressive
+            #if os(macOS)
+            return .progressive
+            #else
+            return .mixed
+            #endif
+        case .progressive:
+            return .progressive
+        case .full:
+            return .full
+        }
+    }
 
     var body: some SwiftUI.Scene {
         WindowGroup {
@@ -53,7 +69,7 @@ struct DepthtopApp: App {
                 appModel.immersiveSpaceState = .closed
             }
         }
-        .immersionStyle(selection: .constant(appModel.useProgressiveImmersion ? .progressive : .full), in: appModel.useProgressiveImmersion ? .progressive : .full)
+        .immersionStyle(selection: .constant(immersionStyleForApp), in: .progressive, .full)
         #else
         ImmersiveSpace(id: AppModel.immersiveSpaceId) {
             makeCompositorLayer(.init())
@@ -66,7 +82,7 @@ struct DepthtopApp: App {
                     appModel.immersiveSpaceState = .closed
                 }
         }
-        .immersionStyle(selection: .constant(appModel.useProgressiveImmersion ? .progressive : .full), in: appModel.useProgressiveImmersion ? .progressive : .full)
+        .immersionStyle(selection: .constant(immersionStyleForApp), in: .progressive, .full)
         #endif
     }
 }

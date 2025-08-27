@@ -18,8 +18,7 @@ struct ToggleImmersiveSpaceButton: View {
         case .open:
             return "Exit Spatial View"
         case .closed:
-            let mode = appModel.useProgressiveImmersion ? "(Progressive)" : "(Full)"
-            return "Enter Spatial View \(mode)"
+            return "Enter Spatial View (\(appModel.selectedImmersionStyle.rawValue))"
         case .inTransition:
             return "Loading..."
         }
@@ -69,7 +68,12 @@ struct ToggleImmersiveSpaceButton: View {
         } else if appModel.immersiveSpaceState == .open {
             return "Exit the spatial view and return to desktop preview"
         } else {
-            return "Enter spatial view to see windows in Vision Pro"
+            let modeDesc = switch appModel.selectedImmersionStyle {
+            case .mixed: "with passthrough blending"
+            case .progressive: "with Digital Crown control"
+            case .full: "in complete immersion"
+            }
+            return "Enter spatial view \(modeDesc)"
         }
     }
     

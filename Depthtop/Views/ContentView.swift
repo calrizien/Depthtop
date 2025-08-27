@@ -131,28 +131,43 @@ struct ContentView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     // Segmented picker for immersion style
                     Picker("Immersion Style", selection: Binding(
-                        get: { appModel.useProgressiveImmersion },
-                        set: { newValue in
-                            appModel.useProgressiveImmersion = newValue
-                        }
+                        get: { appModel.selectedImmersionStyle },
+                        set: { appModel.selectedImmersionStyle = $0 }
                     )) {
-                        Text("Full").tag(false)
-                        Text("Progressive").tag(true)
+                        ForEach(AppModel.ImmersionStylePreference.allCases, id: \.self) { style in
+                            Text(style.rawValue).tag(style)
+                        }
                     }
                     .pickerStyle(.segmented)
                     .labelsHidden()
                     
                     // Description of selected mode
                     HStack(spacing: 6) {
-                        Image(systemName: appModel.useProgressiveImmersion ? "dial.medium" : "dial.high.fill")
-                            .foregroundStyle(appModel.useProgressiveImmersion ? .blue : .green)
+                        Image(systemName: appModel.selectedImmersionStyle.systemImage)
+                            .foregroundStyle(immersionStyleColor)
                             .imageScale(.small)
                         
-                        Text(appModel.useProgressiveImmersion 
-                            ? "Control immersion level with Digital Crown"
-                            : "Complete spatial environment")
+                        Text(appModel.selectedImmersionStyle.description)
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                    }
+                    
+                    // Special note for mixed mode
+                    if appModel.selectedImmersionStyle == .mixed {
+                        HStack(spacing: 4) {
+                            Image(systemName: "info.circle.fill")
+                                .foregroundStyle(.blue)
+                                .imageScale(.small)
+                            VStack(alignment: .leading, spacing: 0) {
+                                Text("Mixed mode (uses Progressive on macOS)")
+                                    .font(.caption2)
+                                    .foregroundStyle(.blue)
+                                Text("May preserve Mac Virtual Display")
+                                    .font(.caption2)
+                                    .foregroundStyle(.blue)
+                            }
+                        }
+                        .padding(.top, 2)
                     }
                     
                     // Warning if space is open
@@ -268,6 +283,18 @@ struct ContentView: View {
                 }
                 .buttonStyle(.borderedProminent)
             }
+        }
+    }
+    
+    // MARK: - Computed Properties
+    private var immersionStyleColor: Color {
+        switch appModel.selectedImmersionStyle {
+        case .mixed:
+            return .purple
+        case .progressive:
+            return .blue
+        case .full:
+            return .green
         }
     }
     
