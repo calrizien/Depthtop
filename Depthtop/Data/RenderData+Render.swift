@@ -42,7 +42,12 @@ extension RenderData {
             frame.startUpdate()
             frame.endUpdate()
 
-            guard let timing = frame.predictTiming() else { continue }
+            guard let timing = frame.predictTiming() else {
+                // If timing prediction fails, we must still end the frame properly
+                frame.startSubmission()
+                frame.endSubmission()
+                continue
+            }
             do {
                 try await LayerRenderer.Clock().sleep(until: timing.optimalInputTime, tolerance: nil)
             } catch {
@@ -77,6 +82,8 @@ extension RenderData {
             commandBuffer.commit()
             frame.endSubmission()
         }
+        
+        logger.info("[RENDERLOOP] Render loop ended - renderer invalidated")
     }
     
     /// Renders a single frame
@@ -231,8 +238,8 @@ extension RenderData {
         guard let model = _appModel else { return SIMD3<Float>(0, 0, -2.0) }
         let arrangement = await MainActor.run { model.windowArrangement }
         
-        // Base distance from viewer
-        let baseDistance: Float = -2.0
+        // Base distance from viewer - INCREASED for comfortable viewing
+        let baseDistance: Float = -5.0  // 5 meters away for comfortable viewing
         
         switch arrangement {
         case .grid:
@@ -241,20 +248,20 @@ extension RenderData {
             let row = index / cols
             let col = index % cols
             return SIMD3<Float>(
-                Float(col - 1) * 1.2,   // X spacing (reduced for better viewing)
-                Float(1 - row) * 0.8,   // Y spacing (reduced)
-                baseDistance            // Z (2 meters in front)
+                Float(col - 1) * 2.5,   // X spacing (increased for comfortable viewing)
+                Float(1 - row) * 1.8,   // Y spacing (increased)
+                baseDistance            // Z (5 meters in front)
             )
             
         case .curved:
             // Arrange in a curve around the user
             let angleStep = Float.pi / 8  // 22.5 degrees
             let angle = Float(index - total/2) * angleStep
-            let radius: Float = 2.5
+            let radius: Float = 5.0  // Increased radius for comfortable viewing
             return SIMD3<Float>(
                 sin(angle) * radius,         // X
                 0,                          // Y (all at same height)
-                baseDistance - cos(angle) * 0.5  // Z (slight curve depth)
+                baseDistance - cos(angle) * 1.0  // Z (slight curve depth)
             )
             
         case .stack:
@@ -262,7 +269,7 @@ extension RenderData {
             return SIMD3<Float>(
                 0,                          // X (centered)
                 0,                          // Y (centered)
-                baseDistance + Float(index) * -0.3  // Z (stacked from -2.0 backwards)
+                baseDistance + Float(index) * -0.8  // Z (stacked from -5.0 backwards with more spacing)
             )
         }
     }
@@ -327,7 +334,7 @@ extension RenderData {
         logger.info("[DEBUG] Rendering debug quad")
         
         // Position the debug quad in front of the viewer
-        let position = SIMD3<Float>(0, 0, -2.0)  // 2 meters in front
+        let position = SIMD3<Float>(0, 0, -5.0)  // 5 meters in front for comfortable viewing
         let modelMatrix = matrix4x4_translation(position.x, position.y, position.z)
         
         // Create WindowUniformsArray for the debug quad

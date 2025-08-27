@@ -125,3 +125,6 @@ node_modules/
 
 # Claude local settings
 .claude/settings.local.json
+
+# Marketing assets (generated images)
+marketing-assets/generated/
