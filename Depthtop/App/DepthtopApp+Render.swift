@@ -28,7 +28,7 @@ extension DepthtopApp {
         }
         #endif
         
-        Task.detached(priority: .high) {
+        Task(priority: .high) {
             logger.info("[RENDER] Creating RenderData instance")
             
             let renderData = RenderData(
@@ -39,10 +39,9 @@ extension DepthtopApp {
             
             logger.info("[RENDER] RenderData created successfully")
             
-            #if os(visionOS)
+            // Set up world tracking for both macOS and visionOS
             logger.info("[RENDER] Setting up world tracking")
             await renderData.setUpWorldTracking()
-            #endif
             
             logger.info("[RENDER] Setting up tile resolve pipeline")
             await renderData.setUpTileResolvePipeline()  // Set up hover tracking pipeline
@@ -60,6 +59,7 @@ extension DepthtopApp {
             }
             
             logger.info("[RENDER] Pipeline verified, proceeding with spatial events setup")
+            logger.info("[RENDER] About to start renderLoop...")
             
             // Handle spatial events for hover effects and window interaction
             #if os(visionOS)

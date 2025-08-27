@@ -63,10 +63,12 @@ extension RenderData {
             }()
             
             if drawables.isEmpty { 
+                logger.warning("[RENDERLOOP] No drawables available for frame \(frameCount)")
                 frame.endSubmission()
                 continue 
             }
             
+            logger.debug("[RENDERLOOP] Got \(drawables.count) drawable(s) for frame \(frameCount)")
             let commandBuffer = queue.makeCommandBuffer()!
             for (index, drawable) in drawables.enumerated() {
                 await renderFrame(drawable: drawable, commandBuffer: commandBuffer)
@@ -80,6 +82,18 @@ extension RenderData {
     /// Renders a single frame
     private func renderFrame(drawable: LayerRenderer.Drawable, commandBuffer: MTLCommandBuffer) async {
         commandBuffer.label = "Window Render"
+        
+        // Query and set device anchor for head tracking
+        let time = LayerRenderer.Clock.Instant.epoch.duration(to: drawable.frameTiming.presentationTime).timeInterval
+        
+        // Set device anchor for both macOS (RemoteImmersiveSpace) and visionOS
+        let deviceAnchor = worldTracking.queryDeviceAnchor(atTimestamp: time)
+        if let deviceAnchor = deviceAnchor {
+            drawable.deviceAnchor = deviceAnchor
+            logger.debug("[RENDER] Device anchor set for frame")
+        } else {
+            logger.warning("[RENDER] No device anchor available - drawable won't be presented properly")
+        }
         
         // Get the drawable's render targets
         guard let colorTexture = drawable.colorTextures.first,
@@ -112,6 +126,19 @@ extension RenderData {
         }
         renderEncoder.label = "Window Render Encoder"
         
+        // Set up viewports for stereoscopic rendering
+        let viewports = drawable.views.map { $0.textureMap.viewport }
+        renderEncoder.setViewports(viewports)
+        
+        // Set up vertex amplification for multiple views if needed
+        if drawable.views.count > 1 {
+            var viewMappings = (0..<drawable.views.count).map {
+                MTLVertexAmplificationViewMapping(viewportArrayIndexOffset: UInt32($0),
+                                                  renderTargetArrayIndexOffset: UInt32($0))
+            }
+            renderEncoder.setVertexAmplificationCount(viewports.count, viewMappings: &viewMappings)
+        }
+        
         // Set up render state
         renderEncoder.setDepthStencilState(depthState)
         renderEncoder.setRenderPipelineState(windowPipeline)
@@ -133,9 +160,6 @@ extension RenderData {
         
         // Encode drawable presentation
         drawable.encodePresent(commandBuffer: commandBuffer)
-        
-        // Commit the command buffer
-        commandBuffer.commit()
     }
     
     /// Renders all captured windows
@@ -190,9 +214,9 @@ extension RenderData {
             uniformsArray.isHovered = 0  // Not hovered for now
             uniformsArray.hoverProgress = 0.0
             
-            // Set uniforms for both vertex and fragment shaders
-            encoder.setVertexBytes(&uniformsArray, length: MemoryLayout<WindowUniformsArray>.size, index: 0)
-            encoder.setFragmentBytes(&uniformsArray, length: MemoryLayout<WindowUniformsArray>.size, index: 0)
+            // Set uniforms for both vertex and fragment shaders (use stride for proper alignment)
+            encoder.setVertexBytes(&uniformsArray, length: MemoryLayout<WindowUniformsArray>.stride, index: 0)
+            encoder.setFragmentBytes(&uniformsArray, length: MemoryLayout<WindowUniformsArray>.stride, index: 0)
             
             // Set texture
             encoder.setFragmentTexture(texture, index: 0)
@@ -253,17 +277,19 @@ extension RenderData {
     private func getViewMatrices(drawable: LayerRenderer.Drawable) async -> [simd_float4x4] {
         var matrices: [simd_float4x4] = []
         
-        for viewIndex in 0..<drawable.views.count {
-            let view = drawable.views[viewIndex]
-            
-            // Get device anchor if available
-            let deviceAnchor = worldTracking.queryDeviceAnchor(atTimestamp: CACurrentMediaTime())
-            if let deviceAnchor = deviceAnchor {
-                // Use device transform for view matrix
-                let transform = deviceAnchor.originFromAnchorTransform
-                matrices.append(transform.inverse)
-            } else {
-                // Use view transform from drawable
+        // Check if we have a device anchor set on the drawable
+        if let deviceAnchor = drawable.deviceAnchor {
+            // Use device anchor transform for all views
+            for view in drawable.views {
+                // Combine the device anchor transform with view-specific transform
+                let deviceTransform = deviceAnchor.originFromAnchorTransform
+                let viewTransform = view.transform
+                // The view matrix is the inverse of the combined transform
+                matrices.append((deviceTransform * viewTransform).inverse)
+            }
+        } else {
+            // Fallback: use view transforms directly
+            for view in drawable.views {
                 matrices.append(view.transform.inverse)
             }
         }
@@ -321,9 +347,9 @@ extension RenderData {
         uniformsArray.isHovered = 0
         uniformsArray.hoverProgress = 0.0
         
-        // Set uniforms
-        encoder.setVertexBytes(&uniformsArray, length: MemoryLayout<WindowUniformsArray>.size, index: 0)
-        encoder.setFragmentBytes(&uniformsArray, length: MemoryLayout<WindowUniformsArray>.size, index: 0)
+        // Set uniforms (use stride for proper alignment)
+        encoder.setVertexBytes(&uniformsArray, length: MemoryLayout<WindowUniformsArray>.stride, index: 0)
+        encoder.setFragmentBytes(&uniformsArray, length: MemoryLayout<WindowUniformsArray>.stride, index: 0)
         
         // No texture for debug quad - shader will use a solid color
         

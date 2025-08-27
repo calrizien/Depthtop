@@ -19,10 +19,12 @@ struct WindowUniforms {
 
 // Window rendering uniforms array for stereoscopic rendering with hover
 struct WindowUniformsArray {
-    struct WindowUniforms uniforms[2];  // One for each eye
-    uint16_t windowID;           // ID for this window (used for hover tracking)
-    uint16_t isHovered;          // Whether this window is currently hovered
-    float hoverProgress;         // Animation progress (0.0 to 1.0)
+    struct WindowUniforms uniforms[2];  // One for each eye (384 bytes)
+    uint16_t windowID;           // ID for this window (2 bytes)
+    uint16_t isHovered;          // Whether this window is currently hovered (2 bytes)
+    uint32_t padding;            // Padding to ensure proper alignment (4 bytes)
+    float hoverProgress;         // Animation progress (4 bytes)
+    uint32_t padding2;           // Additional padding to reach 400 bytes total (4 bytes)
 };
 
 // Function constant indices

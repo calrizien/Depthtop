@@ -166,7 +166,7 @@ actor RenderData {
                     let library = try device.makeLibrary(URL: bundleURL)
                     logger.info("[SUCCESS] Loaded metallib from bundle")
                     // Continue with library
-                    setupPipelineWithLibrary(library)
+                    await setupPipelineWithLibrary(library)
                     return
                 } catch {
                     logger.error("[CRITICAL] Failed to load metallib from bundle: \(error)")
@@ -177,50 +177,57 @@ actor RenderData {
             return
         }
         
-        setupPipelineWithLibrary(library)
+        await setupPipelineWithLibrary(library)
     }
     
-    private func setupPipelineWithLibrary(_ library: MTLLibrary) {
-        Task {
-            // Set up the window rendering pipeline
-            let pipelineDescriptor = MTLRenderPipelineDescriptor()
-            pipelineDescriptor.label = "Window Pipeline"
-            
-            // Create function constants for shader specialization
-            let functionConstants = MTLFunctionConstantValues()
-            
-            // Set hover effect based on platform (only on visionOS)
-            var useHoverEffect = false
-            #if os(visionOS)
-            useHoverEffect = true
-            #endif
-            functionConstants.setConstantValue(&useHoverEffect, type: .bool, index: 0) // FunctionConstantHoverEffect
-            
-            // Set texture array usage based on renderer configuration
-            var useTextureArray = renderer.configuration.layout == .layered
-            functionConstants.setConstantValue(&useTextureArray, type: .bool, index: 1) // FunctionConstantUseTextureArray
-            
-            // Set debug colors
-            var useDebugColors = false
-            #if DEBUG
-            if let model = _appModel {
-                useDebugColors = await MainActor.run { model.debugColors }
-            }
-            #endif
-            functionConstants.setConstantValue(&useDebugColors, type: .bool, index: 2) // FunctionConstantDebugColors
-            
-            // Create specialized functions with constants
-            guard let vertexFunction = try? await library.makeFunction(name: "windowVertex", constantValues: functionConstants) else {
-                logger.error("[CRITICAL] Failed to create specialized windowVertex function")
-                return
-            }
-            guard let fragmentFunction = try? await library.makeFunction(name: "windowFragment", constantValues: functionConstants) else {
-                logger.error("[CRITICAL] Failed to create specialized windowFragment function")
-                return
-            }
-            
-            pipelineDescriptor.vertexFunction = vertexFunction
-            pipelineDescriptor.fragmentFunction = fragmentFunction
+    private func setupPipelineWithLibrary(_ library: MTLLibrary) async {
+        // Verify struct sizes match between Swift and Metal
+        let swiftSize = MemoryLayout<WindowUniformsArray>.stride  // Use stride for buffer allocation
+        let expectedSize = 400  // What Metal expects based on the error
+        logger.info("[DEBUG] WindowUniformsArray size: Swift=\(swiftSize), Expected=\(expectedSize)")
+        if swiftSize != expectedSize {
+            logger.error("[CRITICAL] Size mismatch! Swift struct is \(swiftSize) bytes but Metal expects \(expectedSize) bytes")
+        }
+        
+        // Set up the window rendering pipeline
+        let pipelineDescriptor = MTLRenderPipelineDescriptor()
+        pipelineDescriptor.label = "Window Pipeline"
+        
+        // Create function constants for shader specialization
+        let functionConstants = MTLFunctionConstantValues()
+        
+        // Set hover effect based on platform (only on visionOS)
+        var useHoverEffect = false
+        #if os(visionOS)
+        useHoverEffect = true
+        #endif
+        functionConstants.setConstantValue(&useHoverEffect, type: .bool, index: 0) // FunctionConstantHoverEffect
+        
+        // Set texture array usage based on renderer configuration
+        var useTextureArray = renderer.configuration.layout == .layered
+        functionConstants.setConstantValue(&useTextureArray, type: .bool, index: 1) // FunctionConstantUseTextureArray
+        
+        // Set debug colors
+        var useDebugColors = false
+        #if DEBUG
+        if let model = _appModel {
+            useDebugColors = await MainActor.run { model.debugColors }
+        }
+        #endif
+        functionConstants.setConstantValue(&useDebugColors, type: .bool, index: 2) // FunctionConstantDebugColors
+        
+        // Create specialized functions with constants
+        guard let vertexFunction = try? await library.makeFunction(name: "windowVertex", constantValues: functionConstants) else {
+            logger.error("[CRITICAL] Failed to create specialized windowVertex function")
+            return
+        }
+        guard let fragmentFunction = try? await library.makeFunction(name: "windowFragment", constantValues: functionConstants) else {
+            logger.error("[CRITICAL] Failed to create specialized windowFragment function")
+            return
+        }
+        
+        pipelineDescriptor.vertexFunction = vertexFunction
+        pipelineDescriptor.fragmentFunction = fragmentFunction
         pipelineDescriptor.vertexDescriptor = vertexDescriptor
         pipelineDescriptor.colorAttachments[0].pixelFormat = renderer.configuration.colorFormat
         pipelineDescriptor.depthAttachmentPixelFormat = renderer.configuration.depthFormat
@@ -244,9 +251,8 @@ actor RenderData {
         } catch {
             logger.error("Failed to create window pipeline state: \(error)")
         }
-            
-            logger.info("[SUCCESS] Shader pipeline setup complete")
-        }
+        
+        logger.info("[SUCCESS] Shader pipeline setup complete")
     }
     
     /// Sets the currently hovered window
