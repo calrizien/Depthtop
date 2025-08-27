@@ -135,6 +135,12 @@ extension RenderData {
         // Query and set device anchor for head tracking
         let time = LayerRenderer.Clock.Instant.epoch.duration(to: drawable.frameTiming.presentationTime).timeInterval
         
+        // Check immersion style early to determine anchor requirements
+        var immersionStyle = AppModel.ImmersionStylePreference.full
+        if let model = _appModel {
+            immersionStyle = await MainActor.run { model.selectedImmersionStyle }
+        }
+        
         // Set device anchor for both macOS (RemoteImmersiveSpace) and visionOS
         // Try to get device anchor - it might not be available immediately
         let deviceAnchor = worldTracking.queryDeviceAnchor(atTimestamp: time)
@@ -142,15 +148,24 @@ extension RenderData {
             drawable.deviceAnchor = deviceAnchor
             logger.debug("[RENDER] Device anchor set for frame")
         } else {
-            // Device anchor might not be available on first frames or when tracking is initializing
-            // Try to use a default identity transform for now
-            logger.warning("[RENDER] No device anchor available yet - using identity transform")
+            // Device anchor is REQUIRED for mixed/progressive modes
+            // Without it, the drawable won't be presented
+            logger.warning("[RENDER] No device anchor available yet")
+            
+            // For mixed/progressive modes, we must skip this frame if no anchor
+            if immersionStyle == .mixed || immersionStyle == .progressive {
+                logger.warning("[RENDER] Skipping frame - device anchor required for \(immersionStyle.rawValue) mode")
+                // Still need to properly end the frame
+                drawable.encodePresent(commandBuffer: commandBuffer)
+                return
+            }
         }
         
         // Get the drawable's render targets
         guard let colorTexture = drawable.colorTextures.first,
               let depthTexture = drawable.depthTextures.first else {
             logger.error("No render textures available")
+            drawable.encodePresent(commandBuffer: commandBuffer)
             return
         }
         
@@ -171,16 +186,10 @@ extension RenderData {
             renderPassDescriptor.renderTargetArrayLength = drawable.views.count
         }
         
-        // Check immersion style (requires render context for progressive and mixed)
-        var immersionStyle = AppModel.ImmersionStylePreference.full
-        var requiresRenderContext = false
-        if let model = _appModel {
-            immersionStyle = await MainActor.run { model.selectedImmersionStyle }
-            requiresRenderContext = (immersionStyle == .progressive || immersionStyle == .mixed)
-            logger.info("[RENDER] Immersion mode: \(immersionStyle.rawValue)")
-        } else {
-            logger.warning("[RENDER] No app model - defaulting to full immersion")
-        }
+        // We already checked immersion style earlier for anchor requirements
+        // Now determine if we need render context
+        let requiresRenderContext = (immersionStyle == .progressive || immersionStyle == .mixed)
+        logger.info("[RENDER] Immersion mode: \(immersionStyle.rawValue)")
         
         // IMPORTANT: Render context is REQUIRED for progressive and mixed immersion
         // Progressive immersion allows the user to control immersion level with the Digital Crown,
