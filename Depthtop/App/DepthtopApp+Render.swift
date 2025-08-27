@@ -11,9 +11,9 @@ import CompositorServices
 import ModelIO
 import ARKit
 @preconcurrency import MetalKit
-import os.log
+import os
 
-let logger = Logger(subsystem: "com.depthtop.render", category: "Rendering")
+let logger = os.Logger(subsystem: "com.depthtop.render", category: "Rendering")
 
 extension DepthtopApp {
     func render(_ renderer: LayerRenderer, context: CompositorLayerContext) {

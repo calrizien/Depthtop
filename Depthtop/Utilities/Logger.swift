@@ -38,7 +38,7 @@ final class Logger {
     var logLevel: LogLevel = .info
     
     /// Categories that are currently enabled
-    var enabledCategories: LogCategory = [.error, .warning]
+    var enabledCategories: LogCategory = .all
     
     /// Enable/disable all logging
     var isEnabled = true
@@ -151,7 +151,7 @@ extension Logger {
     /// Silent mode - only errors
     func setSilentMode() {
         logLevel = .error
-        enabledCategories = [.error]
+        enabledCategories = .none
     }
     
     /// Normal mode - info and above
