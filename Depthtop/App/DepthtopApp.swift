@@ -70,6 +70,7 @@ struct DepthtopApp: App {
             }
         }
         .immersionStyle(selection: .constant(immersionStyleForApp), in: .progressive, .full)
+        .immersiveEnvironmentBehavior(.coexist)
         #else
         ImmersiveSpace(id: AppModel.immersiveSpaceId) {
             makeCompositorLayer(.init())
@@ -83,6 +84,7 @@ struct DepthtopApp: App {
                 }
         }
         .immersionStyle(selection: .constant(immersionStyleForApp), in: .progressive, .full)
+        .immersiveEnvironmentBehavior(.coexist)
         #endif
     }
 }
