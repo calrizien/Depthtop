@@ -10,6 +10,10 @@ import SwiftUI
 struct SettingsView: View {
     @Environment(AppModel.self) private var appModel
     @State private var showDeveloperSection = false
+    @State private var showLoggingSection = false
+    @AppStorage("logLevel") private var logLevelRawValue: Int = LogLevel.info.rawValue
+    @AppStorage("logCategories") private var logCategoriesRawValue: Int = LogCategory.all.rawValue
+    @State private var useEmoji: Bool = Logger.shared.useEmoji
     
     var body: some View {
         Form {
@@ -89,6 +93,59 @@ struct SettingsView: View {
                 .padding(.vertical, 8)
             }
             
+            // MARK: - Logging Settings  
+            DisclosureGroup("Logging", isExpanded: $showLoggingSection) {
+                VStack(alignment: .leading, spacing: 12) {
+                    Picker("Log Level", selection: $logLevelRawValue) {
+                        Text("Silent (Errors only)").tag(LogLevel.error.rawValue)
+                        Text("Normal (Info+)").tag(LogLevel.info.rawValue)
+                        Text("Debug").tag(LogLevel.debug.rawValue)
+                        Text("Verbose (Everything)").tag(LogLevel.verbose.rawValue)
+                    }
+                    .pickerStyle(.segmented)
+                    .onChange(of: logLevelRawValue) { _, newValue in
+                        if let level = LogLevel(rawValue: newValue) {
+                            Logger.shared.logLevel = level
+                        }
+                    }
+                    
+                    Toggle("Use Emoji Prefixes", isOn: $useEmoji)
+                        .toggleStyle(.switch)
+                        .onChange(of: useEmoji) { _, newValue in
+                            Logger.shared.useEmoji = newValue
+                        }
+                    
+                    HStack {
+                        Button("Quick: Silent") {
+                            Logger.shared.setSilentMode()
+                            updateUIFromLogger()
+                        }
+                        .buttonStyle(.bordered)
+                        
+                        Button("Quick: Normal") {
+                            Logger.shared.setNormalMode()
+                            updateUIFromLogger()
+                        }
+                        .buttonStyle(.bordered)
+                        
+                        Button("Quick: Debug") {
+                            Logger.shared.setDebugMode()
+                            updateUIFromLogger()
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+            .onAppear {
+                // Load saved settings
+                if let level = LogLevel(rawValue: logLevelRawValue) {
+                    Logger.shared.logLevel = level
+                }
+                Logger.shared.enabledCategories = LogCategory(rawValue: logCategoriesRawValue)
+                useEmoji = Logger.shared.useEmoji
+            }
+            
             // MARK: - Developer Options
             #if DEBUG
             DisclosureGroup("Developer Options", isExpanded: $showDeveloperSection) {
@@ -133,7 +190,13 @@ struct SettingsView: View {
             #endif
         }
         .formStyle(.grouped)
-        .frame(width: 400, height: 500)
+        .frame(width: 400, height: 600)
+    }
+    
+    private func updateUIFromLogger() {
+        logLevelRawValue = Logger.shared.logLevel.rawValue
+        logCategoriesRawValue = Logger.shared.enabledCategories.rawValue
+        useEmoji = Logger.shared.useEmoji
     }
 }
 

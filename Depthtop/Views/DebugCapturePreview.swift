@@ -182,28 +182,28 @@ struct DebugWindowPreview: View {
         Task { @MainActor in
             if let nsImage = await createNSImageFromTexture(texture) {
                 self.displayImage = nsImage
-                print("✅ DEBUG: Updated preview image for \(capturedWindow.title): \(nsImage.size)")
+                Logger.shared.verbose("Updated preview image for \(capturedWindow.title): \(nsImage.size)", category: .preview)
             } else {
-                print("❌ DEBUG: Failed to create NSImage from texture for \(capturedWindow.title)")
+                Logger.shared.warning("Failed to create NSImage from texture for \(capturedWindow.title)", category: .preview)
             }
         }
     }
     
     @MainActor
     private func createNSImageFromTexture(_ texture: MTLTexture) async -> NSImage? {
-        print("🖼️ DEBUG: Creating NSImage from Metal texture: \(texture.width)×\(texture.height)")
+        Logger.shared.verbose("Creating NSImage from Metal texture: \(texture.width)×\(texture.height)", category: .preview)
         
         // Create CIImage from Metal texture
         guard let ciImage = CIImage(mtlTexture: texture, options: [
             .colorSpace: CGColorSpace(name: CGColorSpace.sRGB) as Any
         ]) else {
-            print("❌ DEBUG: Failed to create CIImage from Metal texture")
+            Logger.shared.error("Failed to create CIImage from Metal texture", category: .preview)
             return nil
         }
         
         // Create CIContext for rendering
         guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) else {
-            print("❌ DEBUG: Failed to create color space")
+            Logger.shared.error("Failed to create color space", category: .preview)
             return nil
         }
         
@@ -216,13 +216,13 @@ struct DebugWindowPreview: View {
         // Render to CGImage
         let renderRect = CGRect(x: 0, y: 0, width: texture.width, height: texture.height)
         guard let cgImage = ciContext.createCGImage(ciImage, from: renderRect) else {
-            print("❌ DEBUG: Failed to create CGImage from CIImage")
+            Logger.shared.error("Failed to create CGImage from CIImage", category: .preview)
             return nil
         }
         
         // Create NSImage
         let nsImage = NSImage(cgImage: cgImage, size: CGSize(width: cgImage.width, height: cgImage.height))
-        print("✅ DEBUG: Created NSImage: \(nsImage.size) from CGImage: \(cgImage.width)×\(cgImage.height)")
+        Logger.shared.verbose("Created NSImage: \(nsImage.size) from CGImage: \(cgImage.width)×\(cgImage.height)", category: .preview)
         
         return nsImage
     }

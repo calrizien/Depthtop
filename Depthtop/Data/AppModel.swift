@@ -70,15 +70,30 @@ class AppModel {
     }
     
     init() {
+        configureLogging()
         setupWindowCaptureCallbacks()
+    }
+    
+    private func configureLogging() {
+        // Configure the logger for normal operation - suppress verbose debug output
+        Logger.shared.setNormalMode()  // Shows info, warning, error
+        
+        // You can customize which categories to see:
+        // Logger.shared.enabledCategories = [.capture, .rendering, .error]
+        
+        // Or set a different log level:
+        // Logger.shared.setDebugMode()  // Shows everything for debugging
+        // Logger.shared.setSilentMode() // Only errors
+        
+        Logger.shared.info("Depthtop initialized with logging level: \(Logger.shared.logLevel)", category: .none)
     }
     
     // MARK: - Window Management
     
     func refreshWindows() async {
-        print("🔄 AppModel: Refreshing windows...")
+        Logger.shared.info("Refreshing windows...", category: .capture)
         await windowCaptureManager.refreshAvailableWindows()
-        print("✅ AppModel: Window refresh complete")
+        Logger.shared.info("Window refresh complete", category: .capture)
     }
     
     func startCapture(for window: SCWindow) async {
@@ -124,13 +139,13 @@ class AppModel {
             guard let self = self else { return }
             let newWindow = CapturedWindow(window: window, texture: nil, lastUpdate: Date())
             self.capturedWindows.append(newWindow)
-            print("✅ AppModel: Added captured window: \(window.title ?? "Unknown")")
+            Logger.shared.info("Added captured window: \(window.title ?? "Unknown")", category: .capture)
         }
         
         // Set up callback to remove a window when capture stops
         windowCaptureManager.onCaptureStopped = { [weak self] windowID in
             self?.capturedWindows.removeAll { $0.window.windowID == windowID }
-            print("✅ AppModel: Removed captured window with ID: \(windowID)")
+            Logger.shared.info("Removed captured window with ID: \(windowID)", category: .capture)
         }
         
         // Set up callback to update a window with a new Metal texture
@@ -147,7 +162,7 @@ class AppModel {
                 // Texture is already stored above
                 
                 if isFirstTexture {
-                    print("✅ AppModel: First texture received for window: \(self.capturedWindows[index].window.title ?? "Unknown")")
+                    Logger.shared.info("First texture received for window: \(self.capturedWindows[index].window.title ?? "Unknown")", category: .rendering)
                 }
                 
                 // Notify that preview needs update

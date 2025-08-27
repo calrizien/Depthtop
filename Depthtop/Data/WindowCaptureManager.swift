@@ -381,15 +381,16 @@ class WindowCaptureManager: NSObject {
         }
         let surface = ioSurfaceRef.takeUnretainedValue() as IOSurface
         
-        print("🎯 DEBUG: IOSurface extracted successfully for \(window.title ?? "Unknown"):")
-        print("   Surface dimensions: \(surface.width)x\(surface.height)")
-        print("   Surface pixel format: \(surface.pixelFormat)")
-        print("   Surface bytes per element: \(surface.bytesPerElement)")
-        print("   Surface bytes per row: \(surface.bytesPerRow)")
-        print("   Surface element width: \(surface.elementWidth)")
-        print("   Surface element height: \(surface.elementHeight)")
-        print("   Surface plane count: \(surface.planeCount)")
-        print("   Surface allocation size: \(surface.allocationSize)")
+        Logger.shared.verbose("""
+            IOSurface extracted for \(window.title ?? "Unknown"):
+               Dimensions: \(surface.width)x\(surface.height)
+               Pixel format: \(surface.pixelFormat)
+               Bytes per element: \(surface.bytesPerElement)
+               Bytes per row: \(surface.bytesPerRow)
+               Element size: \(surface.elementWidth)x\(surface.elementHeight)
+               Plane count: \(surface.planeCount)
+               Allocation size: \(surface.allocationSize)
+            """, category: .ioSurface)
         
         // Handle ScreenCaptureKit attachments using proper enum values
         var contentRect: CGRect = .zero
@@ -428,13 +429,13 @@ class WindowCaptureManager: NSObject {
         // Track if this is the first frame with an IOSurface for this window
         let isFirstFrame = true  // We'll let AppModel track this now
         
-        if isFirstFrame {
-            print("📊 First frame info for \(window.title ?? "Unknown"):")
-            print("   Pixel buffer size: \(metalTexture.width)x\(metalTexture.height)")
-            print("   Content rect: \(contentRect)")
-            print("   Content scale: \(contentScale)")
-            print("   Scale factor: \(scaleFactor)")
-        }
+        Logger.shared.logOnce("""
+            First frame for \(window.title ?? "Unknown"):
+               Buffer size: \(metalTexture.width)x\(metalTexture.height)
+               Content rect: \(contentRect)
+               Content scale: \(contentScale)
+               Scale factor: \(scaleFactor)
+            """, key: "firstFrame_\(windowID)", level: .info, category: .performance)
         
         // Notify AppModel with the new Metal texture
         // IMPORTANT: Keep cvTexture alive by passing it along or storing it temporarily
@@ -527,11 +528,13 @@ private class StreamOutput: NSObject, SCStreamOutput {
             let avgFrameTime = timeSinceLastFrame
             let fps = 1.0 / avgFrameTime
             
-            print("📊 StreamOutput stats for '\(window.title ?? "Unknown")':")
-            print("   Frames received: \(frameCount)")
-            print("   Current FPS: \(String(format: "%.1f", fps))")
-            print("   Dropped frames: \(droppedFrameCount)")
-            print("   Errors: \(errorCount)")
+            Logger.shared.debug("""
+                StreamOutput stats for '\(window.title ?? "Unknown")':
+                   Frames received: \(frameCount)
+                   Current FPS: \(String(format: "%.1f", fps))
+                   Dropped frames: \(droppedFrameCount)
+                   Errors: \(errorCount)
+                """, category: .performance)
         }
         
         // Validate sample buffer before processing
