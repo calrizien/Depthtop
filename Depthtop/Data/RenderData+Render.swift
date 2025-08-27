@@ -129,11 +129,17 @@ extension RenderData {
             renderPassDescriptor.renderTargetArrayLength = drawable.views.count
         }
         
-        // For progressive immersion, we need to add a render context to the drawable
-        // This is required by CompositorServices when using progressive immersion style
-        let renderContext = drawable.addRenderContext(commandBuffer: commandBuffer)
+        // Check if we're using progressive immersion (requires render context)
+        var useProgressiveImmersion = false
+        if let model = _appModel {
+            useProgressiveImmersion = await MainActor.run { model.useProgressiveImmersion }
+        }
         
-        // Create render command encoder from the command buffer (not the context)
+        // For progressive immersion, we need to add a render context to the drawable
+        // For full immersion, we use the command buffer directly
+        let renderContext = useProgressiveImmersion ? drawable.addRenderContext(commandBuffer: commandBuffer) : nil
+        
+        // Create render command encoder from the command buffer
         guard let renderEncoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor) else {
             logger.error("Failed to create render encoder")
             return
@@ -172,8 +178,10 @@ extension RenderData {
         // End encoding
         renderEncoder.endEncoding()
         
-        // End the render context with the encoder (required for progressive immersion)
-        renderContext.endEncoding(commandEncoder: renderEncoder)
+        // End the render context with the encoder (only for progressive immersion)
+        if let renderContext = renderContext {
+            renderContext.endEncoding(commandEncoder: renderEncoder)
+        }
         
         // Encode drawable presentation
         drawable.encodePresent(commandBuffer: commandBuffer)
