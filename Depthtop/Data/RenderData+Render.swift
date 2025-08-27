@@ -30,6 +30,12 @@ extension RenderData {
         
         var frameCount = 0
         while renderer.state != .invalidated {
+            // Check renderer state before querying frame
+            guard self.renderer.state == .paused || self.renderer.state == .running else {
+                logger.info("[RENDERLOOP] Renderer not in valid state: \(String(describing: self.renderer.state))")
+                break
+            }
+            
             guard let frame = renderer.queryNextFrame() else { 
                 logger.debug("[RENDERLOOP] No frame available, continuing")
                 continue 
@@ -39,6 +45,13 @@ extension RenderData {
             if frameCount % 60 == 0 {  // Log every 60 frames (about 1 second)
                 logger.info("[RENDERLOOP] Frame \(frameCount) rendering...")
             }
+            
+            // Check again before frame operations
+            guard self.renderer.state != .invalidated else {
+                logger.info("[RENDERLOOP] Renderer invalidated during frame, exiting cleanly")
+                break
+            }
+            
             frame.startUpdate()
             frame.endUpdate()
 
@@ -48,11 +61,32 @@ extension RenderData {
                 frame.endSubmission()
                 continue
             }
+            
+            // Check if we should continue before sleeping
+            guard self.renderer.state != .invalidated else {
+                frame.startSubmission()
+                frame.endSubmission()
+                break
+            }
+            
             do {
                 try await LayerRenderer.Clock().sleep(until: timing.optimalInputTime, tolerance: nil)
             } catch {
                 logger.log(level: .error, "Unable to sleep frame loop: \(error)")
+                // If sleep is interrupted, check if we should exit
+                if self.renderer.state == .invalidated {
+                    frame.startSubmission()
+                    frame.endSubmission()
+                    break
+                }
             }
+            
+            // Final check before submission
+            guard self.renderer.state != .invalidated else {
+                logger.info("[RENDERLOOP] Renderer invalidated before submission, exiting cleanly")
+                break
+            }
+            
             frame.startSubmission()
 
             let drawables = {
@@ -75,12 +109,20 @@ extension RenderData {
             
             logger.debug("[RENDERLOOP] Got \(drawables.count) drawable(s) for frame \(frameCount)")
             let commandBuffer = queue.makeCommandBuffer()!
+            
+            // Render all drawables
             for (index, drawable) in drawables.enumerated() {
                 await renderFrame(drawable: drawable, commandBuffer: commandBuffer)
             }
-           
-            commandBuffer.commit()
-            frame.endSubmission()
+            
+            // Commit and end submission only if renderer is still valid
+            if self.renderer.state != .invalidated {
+                commandBuffer.commit()
+                frame.endSubmission()
+            } else {
+                logger.info("[RENDERLOOP] Renderer invalidated before commit, discarding frame")
+                // Don't commit or end submission if renderer is invalidated
+            }
         }
         
         logger.info("[RENDERLOOP] Render loop ended - renderer invalidated")
